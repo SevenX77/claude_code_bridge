@@ -67,6 +67,16 @@ class TmuxTextSender:
                 self.sleep_fn(enter_delay)
             self.tmux_run_fn(['send-keys', '-t', target, 'Enter'], check=True)
 
+            # Second-Enter fallback for cold-start CLIs that swallow the first
+            # Enter (bracketed-paste race, input loop not yet ready, paste-confirm
+            # dialog). If the first Enter already submitted, the input box is
+            # empty and a second Enter is a harmless no-op on Gemini/Codex/Claude.
+            # Disabled by default (delay=0); opt in via CCB_TMUX_SECOND_ENTER_DELAY.
+            second_enter_delay = self.env_float_fn('CCB_TMUX_SECOND_ENTER_DELAY', 0.0)
+            if second_enter_delay > 0:
+                self.sleep_fn(second_enter_delay)
+                self.tmux_run_fn(['send-keys', '-t', target, 'Enter'], check=False)
+
             if verify and pre_fp:
                 self._verify_delivery(target, pre_fp)
         finally:
