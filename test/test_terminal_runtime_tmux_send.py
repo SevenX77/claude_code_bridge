@@ -173,3 +173,60 @@ def test_verify_soft_skips_when_post_capture_empty() -> None:
 
     retry_sends = [c for c in calls if c[:2] == ['send-keys', '-t'] and len(c) == 4 and c[-1] in ('Return', 'C-m')]
     assert retry_sends == []
+
+
+def _count_enter_sends(calls: list[list[str]]) -> int:
+    return sum(
+        1 for c in calls
+        if c[:2] == ['send-keys', '-t'] and len(c) == 4 and c[-1] == 'Enter'
+    )
+
+
+def _build_second_enter_sender(tmux_run_fn, *, second_enter_delay: float):
+    def env(name: str, default: float) -> float:
+        if name == 'CCB_TMUX_SECOND_ENTER_DELAY':
+            return second_enter_delay
+        if name == 'CCB_TMUX_ENTER_DELAY':
+            return 0.0
+        return default
+
+    return TmuxTextSender(
+        tmux_run_fn=tmux_run_fn,
+        looks_like_tmux_target_fn=lambda _: True,
+        ensure_not_in_copy_mode_fn=lambda _: None,
+        build_buffer_name_fn=lambda **_: 'buf-se',
+        sanitize_text_fn=lambda t: t,
+        should_use_inline_legacy_send_fn=lambda **_: False,
+        env_float_fn=env,
+        sleep_fn=lambda _: None,
+    )
+
+
+def test_second_enter_off_by_default() -> None:
+    """CCB_TMUX_SECOND_ENTER_DELAY=0 → exactly one Enter (stock behavior)."""
+    calls: list[list[str]] = []
+    _build_second_enter_sender(
+        lambda args, **kwargs: calls.append(list(args)) or _cp(),
+        second_enter_delay=0.0,
+    ).send_text('%5', 'msg')
+    assert _count_enter_sends(calls) == 1
+
+
+def test_second_enter_fires_when_delay_positive() -> None:
+    """CCB_TMUX_SECOND_ENTER_DELAY>0 → two Enters for cold-start CLI rescue."""
+    calls: list[list[str]] = []
+    _build_second_enter_sender(
+        lambda args, **kwargs: calls.append(list(args)) or _cp(),
+        second_enter_delay=2.0,
+    ).send_text('%5', 'msg')
+    assert _count_enter_sends(calls) == 2
+
+
+def test_second_enter_ignores_negative_delay() -> None:
+    """Negative values treated as off (guard)."""
+    calls: list[list[str]] = []
+    _build_second_enter_sender(
+        lambda args, **kwargs: calls.append(list(args)) or _cp(),
+        second_enter_delay=-1.0,
+    ).send_text('%5', 'msg')
+    assert _count_enter_sends(calls) == 1

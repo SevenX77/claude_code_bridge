@@ -442,3 +442,26 @@ def test_shutdown_daemon_records_intent_and_terminates_keeper(tmp_path: Path, mo
     assert lifecycle is not None
     assert lifecycle.desired_state == 'stopped'
     assert lifecycle.phase == 'unmounted'
+
+
+def test_keeper_ping_timeout_env_override(monkeypatch) -> None:
+    """Keeper ping timeout reads CCB_KEEPER_PING_TIMEOUT_S; default 2.0; invalid → default."""
+    from ccbd.keeper_runtime.loop import _keeper_ping_timeout_s
+
+    monkeypatch.delenv('CCB_KEEPER_PING_TIMEOUT_S', raising=False)
+    assert _keeper_ping_timeout_s() == 2.0
+
+    monkeypatch.setenv('CCB_KEEPER_PING_TIMEOUT_S', '5')
+    assert _keeper_ping_timeout_s() == 5.0
+
+    monkeypatch.setenv('CCB_KEEPER_PING_TIMEOUT_S', '0.5')
+    assert _keeper_ping_timeout_s() == 0.5
+
+    monkeypatch.setenv('CCB_KEEPER_PING_TIMEOUT_S', 'nope')
+    assert _keeper_ping_timeout_s() == 2.0
+
+    monkeypatch.setenv('CCB_KEEPER_PING_TIMEOUT_S', '-1')
+    assert _keeper_ping_timeout_s() == 2.0
+
+    monkeypatch.setenv('CCB_KEEPER_PING_TIMEOUT_S', '')
+    assert _keeper_ping_timeout_s() == 2.0
