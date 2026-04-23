@@ -135,4 +135,33 @@ def _event_payload(
     )
 
 
-__all__ = ['SCHEMA_VERSION', 'event_path', 'load_event', 'write_event']
+def reception_path(reception_dir: Path | str, req_id: str) -> Path:
+    return Path(reception_dir).expanduser() / 'events' / f'{req_id}.json'
+
+
+def write_reception(
+    *,
+    reception_dir: Path | str,
+    agent_name: str,
+    workspace_path: str,
+    req_id: str,
+    session_id: str | None,
+    hook_event_name: str,
+    prompt_preview: str,
+) -> Path:
+    path = reception_path(reception_dir, req_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        'req_id': req_id,
+        'agent_name': agent_name,
+        'workspace_path': workspace_path,
+        'session_id': session_id,
+        'hook_event_name': hook_event_name,
+        'timestamp_iso': datetime.now(timezone.utc).isoformat(),
+        'prompt_preview': prompt_preview[:200],
+    }
+    atomic_write_json(path, payload)
+    return path
+
+
+__all__ = ['SCHEMA_VERSION', 'event_path', 'load_event', 'write_event', 'reception_path', 'write_reception']
