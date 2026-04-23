@@ -24,6 +24,7 @@ from . import (
     send_message as _send_message_impl,
     update_project_session_binding,
 )
+from provider_hooks.artifacts_runtime.transcript import extract_req_id
 from .log_reader_facade import GeminiLogReader
 
 
@@ -82,7 +83,18 @@ class GeminiCommunicator:
     def _send_via_terminal(self, content: str) -> bool:
         if not self.backend or not self.pane_id:
             raise RuntimeError("Terminal session not configured")
-        self.backend.send_text(self.pane_id, content)
+        req_id = extract_req_id(content)
+        reception_dir: Path | None = None
+        if req_id:
+            session = getattr(self, 'session', None)
+            completion_dir = getattr(session, 'completion_dir', None) if session is not None else None
+            if completion_dir is not None:
+                reception_dir = Path(completion_dir).parent / 'reception'
+            else:
+                runtime_dir = getattr(self, 'runtime_dir', None)
+                if runtime_dir is not None:
+                    reception_dir = Path(runtime_dir) / 'reception'
+        self.backend.send_text(self.pane_id, content, req_id=req_id, reception_dir=reception_dir)
         return True
 
     def _send_message(self, content: str) -> tuple[str, dict[str, Any]]:
