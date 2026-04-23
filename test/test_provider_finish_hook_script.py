@@ -143,3 +143,115 @@ def test_provider_finish_hook_accepts_job_id_anchor_from_prompt(tmp_path: Path) 
     event = json.loads(event_path.read_text(encoding="utf-8"))
     assert event["req_id"] == req_id
     assert event["reply"] == "job-based reply"
+
+
+def test_start_event_writes_reception_artifact(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    reception_dir = tmp_path / "reception"
+    completion_dir = tmp_path / "completion"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    req_id = "job_xyz123"
+    payload = {
+        "prompt": f"do something\n\nCCB_REQ_ID: {req_id}",
+        "session_id": "sess-1",
+        "hook_event_name": "BeforeAgent",
+    }
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(project_root / "bin" / "ccb-provider-finish-hook"),
+            "--provider",
+            "gemini",
+            "--event",
+            "start",
+            "--reception-dir",
+            str(reception_dir),
+            "--completion-dir",
+            str(completion_dir),
+            "--agent-name",
+            "a2",
+            "--workspace",
+            str(workspace),
+        ],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert proc.returncode == 0, f"stderr: {proc.stderr}"
+    artifact = reception_dir / "events" / f"{req_id}.json"
+    assert artifact.exists(), f"reception artifact missing; tree: {list(reception_dir.rglob('*'))}"
+    data = json.loads(artifact.read_text(encoding="utf-8"))
+    assert data["req_id"] == req_id
+    assert data["session_id"] == "sess-1"
+    assert data["hook_event_name"] == "BeforeAgent"
+
+
+def test_start_event_no_reqid_returns_zero_no_artifact(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    reception_dir = tmp_path / "reception"
+    completion_dir = tmp_path / "completion"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    payload = {"prompt": "user typed this directly", "session_id": "sess-1"}
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(project_root / "bin" / "ccb-provider-finish-hook"),
+            "--provider",
+            "gemini",
+            "--event",
+            "start",
+            "--reception-dir",
+            str(reception_dir),
+            "--completion-dir",
+            str(completion_dir),
+            "--agent-name",
+            "a2",
+            "--workspace",
+            str(workspace),
+        ],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert proc.returncode == 0
+    assert not reception_dir.exists() or not list(reception_dir.rglob("*.json"))
+
+
+def test_start_event_broken_json_stdin_returns_zero(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    completion_dir = tmp_path / "completion"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(project_root / "bin" / "ccb-provider-finish-hook"),
+            "--provider",
+            "gemini",
+            "--event",
+            "start",
+            "--reception-dir",
+            str(tmp_path / "reception"),
+            "--completion-dir",
+            str(completion_dir),
+            "--agent-name",
+            "a2",
+            "--workspace",
+            str(workspace),
+        ],
+        input="{not valid json",
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert proc.returncode == 0
