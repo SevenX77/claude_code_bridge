@@ -35,11 +35,50 @@ def install_gemini_hooks(
     return save_json(settings_path, data)
 
 
+def _is_owned_command(command: str) -> bool:
+    """Check if command is owned by CCB (contains ccb-provider-finish-hook basename)."""
+    return 'ccb-provider-finish-hook' in str(command)
+
+def _purge_owned_entries(entries: list) -> list:
+    """Remove entries that contain only our owned commands."""
+    result = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        hooks = entry.get('hooks')
+        if not isinstance(hooks, list):
+            continue
+        # Filter out command hooks that are owned by us
+        remaining_hooks = []
+        for hook in hooks:
+            if not isinstance(hook, dict):
+                remaining_hooks.append(hook)
+                continue
+            if str(hook.get('type') or '').strip().lower() != 'command':
+                remaining_hooks.append(hook)
+                continue
+            if not _is_owned_command(hook.get('command', '')):
+                remaining_hooks.append(hook)
+        # Only keep entry if it still has hooks
+        if remaining_hooks:
+            new_entry = dict(entry)
+            new_entry['hooks'] = remaining_hooks
+            result.append(new_entry)
+    return result
+
 def _append_event(hooks: dict, event_name: str, command: str) -> None:
-    """Helper: append event hook entry to hooks dict, idempotent."""
+    """Helper: append event hook entry to hooks dict, idempotent.
+    
+    Purges any existing entries with our owned commands before appending.
+    """
     entries = hooks.get(event_name)
     if not isinstance(entries, list):
         entries = []
+    
+    # Purge old owned entries first
+    entries = _purge_owned_entries(entries)
+    
+    # Check if exact command already exists (idempotent)
     if not gemini_event_has_command(entries, command):
         entries.append({
             'matcher': '*',
