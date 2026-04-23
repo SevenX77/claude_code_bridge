@@ -45,3 +45,22 @@ def test_gemini_send_via_terminal_no_reqid_passes_none(tmp_path: Path) -> None:
 
     _, kwargs = comm.backend.send_text.call_args
     assert kwargs.get('req_id') is None
+
+def test_send_via_terminal_creates_reception_dir_if_missing(tmp_path: Path) -> None:
+    """如果 reception_dir 在 send 时不存在，_send_via_terminal 应 defensively 创建它。"""
+    from provider_backends.gemini.comm_runtime.communicator_facade import GeminiCommunicator
+    comm = GeminiCommunicator.__new__(GeminiCommunicator)
+    comm.backend = MagicMock()
+    comm.pane_id = "%5"
+    comm.session = MagicMock()
+    completion_dir = tmp_path / "agent" / "provider-runtime" / "gemini" / "completion"
+    completion_dir.mkdir(parents=True)
+    # 故意不创建 reception，让 _send_via_terminal 自己 mkdir
+    expected_reception = completion_dir.parent / "reception"
+    assert not expected_reception.exists(), "前置：reception_dir 应不存在"
+    comm.session.completion_dir = completion_dir
+    content = "CCB_REQ_ID: job_testxyz Execute the request"
+    comm._send_via_terminal(content)
+    assert expected_reception.exists(), "_send_via_terminal 应 defensively mkdir reception_dir"
+    _, kwargs = comm.backend.send_text.call_args
+    assert kwargs.get('reception_dir') == expected_reception

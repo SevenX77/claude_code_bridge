@@ -94,6 +94,8 @@ class GeminiCommunicator:
                 runtime_dir = getattr(self, 'runtime_dir', None)
                 if runtime_dir is not None:
                     reception_dir = Path(runtime_dir) / 'reception'
+        if reception_dir is not None:
+            reception_dir.mkdir(parents=True, exist_ok=True)
         self.backend.send_text(self.pane_id, content, req_id=req_id, reception_dir=reception_dir)
         return True
 
