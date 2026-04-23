@@ -230,3 +230,244 @@ def test_second_enter_ignores_negative_delay() -> None:
         second_enter_delay=-1.0,
     ).send_text('%5', 'msg')
     assert _count_enter_sends(calls) == 1
+
+
+# ===== Reception-driven mode tests (R2) =====
+
+import json as _json_for_reception_tests  # avoid clash if file has its own json import
+
+
+def _reception_env(name: str, default: float) -> float:
+    """env_float_fn for reception-driven tests: 短超时 + 无延迟。"""
+    if name == 'CCB_VERIFY_DELIVERY':
+        return 0.0
+    if name == 'CCB_RECEPTION_DRIVEN':
+        return 1.0  # 默认开
+    if name == 'CCB_RECEPTION_TIMEOUT_S':
+        return 10.0  # 短超时方便测试
+    if name == 'CCB_RECEPTION_POLL_INTERVAL_S':
+        return 0.1
+    if name == 'CCB_RECEPTION_MAX_ATTEMPTS':
+        return 3.0
+    if name in ('CCB_TMUX_ENTER_DELAY', 'CCB_TMUX_SECOND_ENTER_DELAY'):
+        return 0.0  # 测试零延迟
+    return default
+
+
+def _build_reception_sender(tmux_run_fn, *, time_fn=None, env_fn=_reception_env):
+    """构造一个 TmuxTextSender，自动生成单调 time + 0 sleep。"""
+    if time_fn is None:
+        clock = [0.0]
+        def time_fn():
+            clock[0] += 0.05
+            return clock[0]
+    return TmuxTextSender(
+        tmux_run_fn=tmux_run_fn,
+        looks_like_tmux_target_fn=lambda _: True,
+        ensure_not_in_copy_mode_fn=lambda _: None,
+        build_buffer_name_fn=lambda **_: 'buf-r',
+        sanitize_text_fn=lambda t: t,
+        should_use_inline_legacy_send_fn=lambda **_: False,
+        env_float_fn=env_fn,
+        sleep_fn=lambda _: None,
+        time_fn=time_fn,
+    )
+
+
+def test_reception_path_A_present_at_first_poll(tmp_path):
+    """路径 A：reception 文件 paste 后立刻就在 → 1 paste + Enter，无 retry。"""
+    reception_root = tmp_path / "reception"
+    (reception_root / "events").mkdir(parents=True)
+    (reception_root / "events" / "job_test_a.json").write_text("{}")
+
+    calls = []
+    def tmux_run(args, **kw):
+        calls.append(list(args))
+        if args and args[0] == 'capture-pane':
+            return _cp(stdout="")  # 不重要：reception 已存在
+        return _cp()
+
+    _build_reception_sender(tmux_run).send_text(
+        '%5', 'CCB_REQ_ID: job_test_a do thing',
+        req_id='job_test_a', reception_dir=reception_root,
+    )
+
+    paste_count = sum(1 for c in calls if c[:1] == ['paste-buffer'])
+    assert paste_count == 1, f"expected 1 paste, got {paste_count}: {calls}"
+    # 不应该有 retry 时的 Esc / C-u
+    assert not any(c[-1] == 'Escape' for c in calls if 'send-keys' in c)
+
+
+def test_reception_path_B_enter_swallowed_补enter_then_succeed(tmp_path):
+    """路径 B：reception 第一次 poll 没出，但 pane 含 req_id → 补 Enter，第二次 poll 出现。"""
+    reception_root = tmp_path / "reception"
+    (reception_root / "events").mkdir(parents=True)
+    artifact = reception_root / "events" / "job_test_b.json"
+
+    poll_count = [0]
+    enter_补_count = [0]
+    calls = []
+    def tmux_run(args, **kw):
+        calls.append(list(args))
+        if args and args[0] == 'capture-pane':
+            poll_count[0] += 1
+            if poll_count[0] >= 2:
+                artifact.write_text("{}")  # 第二次 poll 时 reception 出现
+            return _cp(stdout="> Type your message\n  CCB_REQ_ID: job_test_b do thing\n")
+        if args[:2] == ['send-keys', '-t'] and len(args) == 4 and args[3] == 'Enter':
+            enter_补_count[0] += 1  # 含初始 1 个 + 补的
+        return _cp()
+
+    _build_reception_sender(tmux_run).send_text(
+        '%5', 'CCB_REQ_ID: job_test_b do thing',
+        req_id='job_test_b', reception_dir=reception_root,
+    )
+
+    paste_count = sum(1 for c in calls if c[:1] == ['paste-buffer'])
+    assert paste_count == 1, "应该只 paste 1 次（不 retry，只补 Enter）"
+    assert enter_补_count[0] >= 2, "应该至少 1 个初始 Enter + 1 个补 Enter"
+
+
+def test_reception_path_C_paste_lost_then_retry_succeeds(tmp_path):
+    """路径 C：第一轮 pane 既无 activity 又无 req_id → break → 第二轮 paste，reception 出现。"""
+    reception_root = tmp_path / "reception"
+    (reception_root / "events").mkdir(parents=True)
+    artifact = reception_root / "events" / "job_test_c.json"
+
+    pane_responses = iter([
+        "> Type your message\n",  # 第一轮 poll：完全没 paste 进去
+        "> CCB_REQ_ID: job_test_c\n",  # 第二轮 paste 后：req_id 在
+    ])
+    poll_count = [0]
+    calls = []
+    def tmux_run(args, **kw):
+        calls.append(list(args))
+        if args and args[0] == 'capture-pane':
+            poll_count[0] += 1
+            try:
+                response = next(pane_responses)
+            except StopIteration:
+                response = "> CCB_REQ_ID: job_test_c\n"
+            if poll_count[0] >= 2:
+                artifact.write_text("{}")
+            return _cp(stdout=response)
+        return _cp()
+
+    _build_reception_sender(tmux_run).send_text(
+        '%5', 'CCB_REQ_ID: job_test_c do thing',
+        req_id='job_test_c', reception_dir=reception_root,
+    )
+
+    paste_count = sum(1 for c in calls if c[:1] == ['paste-buffer'])
+    assert paste_count == 2, f"应该 paste 2 次（第一轮失败 + 第二轮重 paste），实际 {paste_count}"
+    # 第二轮前应该有 Escape + C-u
+    sk = [c for c in calls if c[:2] == ['send-keys', '-t']]
+    assert any(c[-1] == 'Escape' for c in sk), "retry 前必须发 Escape"
+    assert any(c[-1] == 'C-u' for c in sk), "retry 前必须发 C-u"
+
+
+def test_reception_path_D_all_attempts_fail_raises(tmp_path):
+    """路径 D：3 轮全部 paste 都没成功且 reception 始终不出现 → raise CcbDeliveryError。"""
+    reception_root = tmp_path / "reception"
+    (reception_root / "events").mkdir(parents=True)
+
+    def tmux_run(args, **kw):
+        if args and args[0] == 'capture-pane':
+            return _cp(stdout="> Type your message\n")  # 永远没 req_id 也没 activity
+        return _cp()
+
+    with pytest.raises(CcbDeliveryError):
+        _build_reception_sender(tmux_run).send_text(
+            '%5', 'CCB_REQ_ID: job_test_d do thing',
+            req_id='job_test_d', reception_dir=reception_root,
+        )
+
+
+def test_reception_path_E_no_req_id_falls_back_to_legacy(tmp_path):
+    """路径 E：req_id=None → 走旧路径，绝不 poll capture-pane。"""
+    calls = []
+    def tmux_run(args, **kw):
+        calls.append(list(args))
+        return _cp()
+
+    _build_reception_sender(tmux_run).send_text('%5', 'plain prompt')
+
+    captures = [c for c in calls if c and c[0] == 'capture-pane']
+    assert captures == [], f"旧路径不应该 capture-pane，实际: {captures}"
+
+
+def test_reception_path_F_kill_switch_forces_legacy(tmp_path):
+    """路径 F：CCB_RECEPTION_DRIVEN=0 → 强制走旧路径。"""
+    reception_root = tmp_path / "reception"
+    (reception_root / "events").mkdir(parents=True)
+
+    def kill_switch_env(name, default):
+        if name == 'CCB_RECEPTION_DRIVEN':
+            return 0.0  # 关闭
+        return _reception_env(name, default)
+
+    calls = []
+    def tmux_run(args, **kw):
+        calls.append(list(args))
+        return _cp()
+
+    _build_reception_sender(tmux_run, env_fn=kill_switch_env).send_text(
+        '%5', 'CCB_REQ_ID: job_test_f',
+        req_id='job_test_f', reception_dir=reception_root,
+    )
+
+    captures = [c for c in calls if c and c[0] == 'capture-pane']
+    assert captures == [], "kill switch 开启时不应 capture-pane"
+
+
+def test_reception_path_G_agent_activity_returns_success_without_artifact(tmp_path):
+    """路径 G：reception 文件不出，但 pane tail 含 'Planning' → 返回成功（绝不 retry）。"""
+    reception_root = tmp_path / "reception"
+    (reception_root / "events").mkdir(parents=True)
+
+    calls = []
+    def tmux_run(args, **kw):
+        calls.append(list(args))
+        if args and args[0] == 'capture-pane':
+            return _cp(stdout="✦ Planning your request...\n  using tools\n")
+        return _cp()
+
+    # 不应 raise，且不应 retry
+    _build_reception_sender(tmux_run).send_text(
+        '%5', 'CCB_REQ_ID: job_test_g do thing',
+        req_id='job_test_g', reception_dir=reception_root,
+    )
+
+    paste_count = sum(1 for c in calls if c[:1] == ['paste-buffer'])
+    assert paste_count == 1, f"agent 活动确认后不应 retry paste，实际 {paste_count}"
+
+
+def test_reception_path_H_old_scrollback_req_id_does_not_satisfy(tmp_path):
+    """路径 H：req_id 在更老的 scrollback 但末 10 行没有 → 不视为 paste 成功 → retry。
+
+    关键点：tmux_send 用 `capture-pane -S -10` 只取末 10 行；测试通过让 mock 仅返回不含 req_id 的内容来验证这个边界。
+    """
+    reception_root = tmp_path / "reception"
+    (reception_root / "events").mkdir(parents=True)
+    artifact = reception_root / "events" / "job_test_h.json"
+
+    capture_args_seen = []
+    poll_count = [0]
+    def tmux_run(args, **kw):
+        if args and args[0] == 'capture-pane':
+            capture_args_seen.append(list(args))
+            poll_count[0] += 1
+            if poll_count[0] >= 3:
+                artifact.write_text("{}")  # 让最终成功，避免无限 raise
+            return _cp(stdout="> Type your message\n")  # 永远不含 req_id
+        return _cp()
+
+    _build_reception_sender(tmux_run).send_text(
+        '%5', 'CCB_REQ_ID: job_test_h do thing',
+        req_id='job_test_h', reception_dir=reception_root,
+    )
+
+    # 验证 capture-pane 命令包含 -S -10
+    assert capture_args_seen, "至少应该 capture 过"
+    sample = capture_args_seen[0]
+    assert '-S' in sample and '-10' in sample, f"capture-pane 应限定末 10 行，实际命令: {sample}"
