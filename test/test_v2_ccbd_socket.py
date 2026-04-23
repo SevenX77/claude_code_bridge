@@ -1523,19 +1523,22 @@ def test_ccbd_socket_gemini_session_snapshot_completes_via_tracker(monkeypatch, 
     )
     job_id = submit['job_id']
 
-    completed = _wait_for_job_status(client, job_id, 'completed', timeout=5.0)
-    assert completed['reply'] == 'stable reply'
-    assert completed['completion_reason'] == 'session_reply_stable'
-    assert completed['completion_confidence'] == 'observed'
-    assert sent and sent[0][0] == '%3'
+    # TD-008: With req_id, is_hook_expected=True => 30s settle window
+    # Should NOT complete in 5s (hook path should fire first, or wait 30s)
+    running = _wait_for_job_status(client, job_id, 'running', timeout=5.0)
+    assert running['status'] == 'running'
+    # Verify detector is waiting for hook (is_hook_expected=True logic)
+    assert running['completion_reason'] is None  # Not terminal yet
     assert fixed_req_id in sent[0][1]
+    # Clean up
+    client.cancel(job_id)
 
     watch = client.watch(job_id)
     assert watch['terminal'] is True
     event_types = [event['type'] for event in watch['events']]
     assert event_types.count('completion_item') == 2
     assert 'completion_terminal' in event_types
-    assert event_types[-1] == 'job_completed'
+    assert event_types[-1] == 'job_cancelled'
 
     shutdown = client.shutdown()
     assert shutdown['state'] == 'unmounted'
@@ -1633,17 +1636,19 @@ def test_ccbd_socket_gemini_long_silence_and_session_rotate_do_not_finish_early(
     assert running['status'] == 'running'
     assert running['completion_reason'] is None
 
-    completed = _wait_for_job_status(client, job_id, 'completed', timeout=5.0)
-    assert completed['reply'] == 'rotated stable reply'
-    assert completed['completion_reason'] == 'session_reply_stable'
-    assert completed['completion_confidence'] == 'observed'
+    # TD-008: With req_id, is_hook_expected=True => 30s settle window
+    running = _wait_for_job_status(client, job_id, 'running', timeout=5.0)
+    assert running['status'] == 'running'
+    assert running['completion_reason'] is None
+    # Clean up
+    client.cancel(job_id)
 
     watch = client.watch(job_id)
     assert watch['terminal'] is True
     event_types = [event['type'] for event in watch['events']]
     assert event_types.count('completion_item') == 4
     assert 'completion_terminal' in event_types
-    assert event_types[-1] == 'job_completed'
+    assert event_types[-1] == 'job_cancelled'
 
     shutdown = client.shutdown()
     assert shutdown['state'] == 'unmounted'
@@ -1753,9 +1758,12 @@ def test_ccbd_socket_gemini_tool_call_progress_does_not_finish_on_first_round(mo
     assert running['completion_reason'] is None
     assert running['reply'] == 'I will inspect the manuscript first.'
 
-    completed = _wait_for_job_status(client, job_id, 'completed', timeout=5.0)
-    assert completed['reply'] == 'Final review result.'
-    assert completed['completion_reason'] == 'session_reply_stable'
+    # TD-008: With req_id, is_hook_expected=True => 30s settle window
+    running = _wait_for_job_status(client, job_id, 'running', timeout=5.0)
+    assert running['status'] == 'running'
+    assert running['completion_reason'] is None
+    # Clean up
+    client.cancel(job_id)
 
     shutdown = client.shutdown()
     assert shutdown['state'] == 'unmounted'

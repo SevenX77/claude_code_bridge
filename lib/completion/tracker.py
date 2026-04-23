@@ -76,7 +76,7 @@ class CompletionTrackerService:
         # TD-008: Determine if hook is expected (Gemini with req_id)
         is_hook_expected = (
             manifest.provider == 'gemini' and
-            bool(job.job_id or '').strip()
+            bool((job.job_id or '').strip())
         )
 
         profile = self._registry.build_profile(
