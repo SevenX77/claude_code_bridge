@@ -26,19 +26,39 @@ def prepare_workspace_provider_hooks(
     normalized = str(provider or '').strip().lower()
     if normalized not in {'claude', 'gemini'}:
         return None
-    command = build_hook_command(
+    script_path = Path(__file__).resolve().parents[3] / 'bin' / 'ccb-provider-finish-hook'
+
+    after_command = build_hook_command(
         provider=normalized,
-        script_path=Path(__file__).resolve().parents[3] / 'bin' / 'ccb-provider-finish-hook',
+        script_path=script_path,
         python_executable=sys.executable,
         completion_dir=completion_dir,
         agent_name=agent_name,
         workspace_path=workspace_path,
+        event='finish',
+        timeout_s=5,
     )
+    before_command = None
+    if normalized == 'gemini':
+        reception_dir = completion_dir.parent / 'reception'
+        reception_dir.mkdir(parents=True, exist_ok=True)
+        before_command = build_hook_command(
+            provider=normalized,
+            script_path=script_path,
+            python_executable=sys.executable,
+            completion_dir=completion_dir,
+            agent_name=agent_name,
+            workspace_path=workspace_path,
+            event='start',
+            reception_dir=reception_dir,
+            timeout_s=5,
+        )
     return install_workspace_completion_hooks(
         provider=normalized,
         workspace_path=workspace_path,
         home_root=home_root,
-        command=command,
+        after_command=after_command,
+        before_command=before_command,
         resolved_profile=resolved_profile,
     )
 
