@@ -12,12 +12,14 @@ from completion.models import (
     CompletionItemKind,
     CompletionRequestContext,
     CompletionState,
+    CompletionStatus,
     seconds_between,
     reply_candidates_from_item,
 )
 from completion.registry import CompletionRegistry
 from completion.selectors.base import ReplySelector
 from provider_core.catalog import ProviderCatalog
+
 
 _DEFAULT_REQUEST_TIMEOUT_S = 3600.0
 _DISABLED_REQUEST_BINDING_TIMEOUT_S = 315360000.0
@@ -58,16 +60,37 @@ class CompletionTrackerService:
     def start(self, job: JobRecord, *, started_at: str) -> CompletionTrackerView:
         if job.target_kind is TargetKind.AGENT:
             spec = self._config.agents[job.agent_name]
-            manifest = self._provider_catalog.resolve_completion_manifest(spec.provider, spec.runtime_mode)
+            manifest = self._provider_catalog.resolve_completion_manifest(
+                spec.provider, spec.runtime_mode
+            )
             tracker_name = job.agent_name
         else:
-            spec = SimpleNamespace(provider=job.provider, runtime_mode=RuntimeMode.PANE_BACKED)
-            manifest = self._provider_catalog.resolve_completion_manifest(job.provider, RuntimeMode.PANE_BACKED)
+            spec = SimpleNamespace(
+                provider=job.provider, runtime_mode=RuntimeMode.PANE_BACKED
+            )
+            manifest = self._provider_catalog.resolve_completion_manifest(
+                job.provider, RuntimeMode.PANE_BACKED
+            )
             tracker_name = job.agent_name or job.provider
-        profile = self._registry.build_profile(spec, None, manifest)
+
+        # TD-008: Determine if hook is expected (Gemini with req_id)
+        is_hook_expected = (
+            manifest.provider == 'gemini' and
+            bool(job.job_id or '').strip()
+        )
+
+        profile = self._registry.build_profile(
+            spec, None, manifest, is_hook_expected=is_hook_expected
+        )
         detector = self._registry.build_detector(profile)
         selector = self._registry.build_selector(profile)
-        binding_timeout_s = self._request_timeout_s if self._request_timeout_s > 0 else _DISABLED_REQUEST_BINDING_TIMEOUT_S
+
+        binding_timeout_s = (
+            self._request_timeout_s
+            if self._request_timeout_s > 0
+            else _DISABLED_REQUEST_BINDING_TIMEOUT_S
+        )
+
         detector.bind(
             CompletionRequestContext(
                 req_id=job.job_id,
@@ -81,6 +104,7 @@ class CompletionTrackerService:
                 updated_at=started_at,
             ),
         )
+
         self._trackers[job.job_id] = _ActiveTracker(
             agent_name=tracker_name,
             detector=detector,
@@ -94,10 +118,16 @@ class CompletionTrackerService:
         tracker = self._trackers.get(job_id)
         if tracker is None:
             return None
+
         decision = tracker.detector.decision()
-        reply = tracker.selector.select(decision) if decision.terminal else tracker.selector.preview()
+        reply = (
+            tracker.selector.select(decision)
+            if decision.terminal
+            else tracker.selector.preview()
+        )
         if reply and not decision.reply:
             decision = decision.with_reply(reply)
+
         return CompletionTrackerView(
             job_id=job_id,
             agent_name=tracker.agent_name,
@@ -107,26 +137,35 @@ class CompletionTrackerService:
 
     def ingest(self, job_id: str, item) -> CompletionTrackerView:
         tracker = self._require(job_id)
+
         if item.kind is CompletionItemKind.SESSION_ROTATE:
             tracker.selector.reset()
+
         for candidate in reply_candidates_from_item(item):
             tracker.selector.ingest_candidate(candidate)
+
         tracker.detector.ingest(item)
+
         current = self.current(job_id)
         assert current is not None
         return current
 
     def tick(self, job_id: str, *, now: str) -> CompletionTrackerView:
         tracker = self._require(job_id)
+
         if hasattr(tracker.detector, 'tick'):
             tracker.detector.tick(now, tracker.detector.state().latest_cursor)
+
         self._maybe_finalize_timeout(tracker, now=now)
+
         current = self.current(job_id)
         assert current is not None
         return current
 
     def tick_all(self, *, now: str) -> tuple[CompletionTrackerView, ...]:
-        return tuple(self.tick(job_id, now=now) for job_id in tuple(self._trackers))
+        return tuple(
+            self.tick(job_id, now=now) for job_id in tuple(self._trackers)
+        )
 
     def finish(self, job_id: str) -> None:
         self._trackers.pop(job_id, None)
@@ -137,17 +176,26 @@ class CompletionTrackerService:
         except KeyError as exc:
             raise KeyError(f'unknown completion tracker: {job_id}') from exc
 
-    def _maybe_finalize_timeout(self, tracker: _ActiveTracker, *, now: str) -> None:
+    def _maybe_finalize_timeout(
+        self, tracker: _ActiveTracker, *, now: str
+    ) -> None:
         if tracker.timeout_s <= 0:
             return
+
         if not hasattr(tracker.detector, 'finalize_timeout'):
             return
+
         if tracker.detector.decision().terminal:
             return
+
         try:
             elapsed_s = seconds_between(tracker.started_at, now)
         except Exception:
             return
+
         if elapsed_s < tracker.timeout_s:
             return
-        tracker.detector.finalize_timeout(now, tracker.detector.state().latest_cursor)
+
+        tracker.detector.finalize_timeout(
+            now, tracker.detector.state().latest_cursor
+        )

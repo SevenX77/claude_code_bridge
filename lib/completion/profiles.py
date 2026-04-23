@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
 from agents.models import AgentSpec
 from completion.models import (
     CompletionFamily,
@@ -26,15 +25,31 @@ class CompletionManifest:
     selector_family: SelectorFamily
 
 
-def build_completion_profile(agent_spec: AgentSpec, manifest: CompletionManifest) -> CompletionProfile:
+def build_completion_profile(
+    agent_spec: AgentSpec,
+    manifest: CompletionManifest,
+    *,
+    is_hook_expected: bool = False,
+) -> CompletionProfile:
+    """Build a CompletionProfile from agent spec and manifest.
+    
+    Args:
+        agent_spec: The agent specification
+        manifest: The completion manifest from provider catalog
+        is_hook_expected: Whether hook is expected to fire (TD-008)
+            True for Gemini with req_id, False otherwise
+    """
     if agent_spec.provider != manifest.provider:
         raise CompletionValidationError(
-            f'agent provider {agent_spec.provider!r} does not match manifest provider {manifest.provider!r}'
+            f'agent provider {agent_spec.provider!r} does not match '
+            f'manifest provider {manifest.provider!r}'
         )
     if agent_spec.runtime_mode.value != manifest.runtime_mode:
         raise CompletionValidationError(
-            f'agent runtime_mode {agent_spec.runtime_mode.value!r} does not match manifest runtime_mode {manifest.runtime_mode!r}'
+            f'agent runtime_mode {agent_spec.runtime_mode.value!r} does not match '
+            f'manifest runtime_mode {manifest.runtime_mode!r}'
         )
+    
     return CompletionProfile(
         provider=manifest.provider,
         runtime_mode=agent_spec.runtime_mode,
@@ -46,4 +61,5 @@ def build_completion_profile(agent_spec: AgentSpec, manifest: CompletionManifest
         supports_reply_stability=manifest.supports_reply_stability,
         supports_terminal_reason=manifest.supports_terminal_reason,
         selector_family=manifest.selector_family,
+        is_hook_expected=is_hook_expected,
     )

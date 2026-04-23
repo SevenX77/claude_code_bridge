@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from agents.models import RuntimeMode, normalize_agent_name
-
 from ..enums import CompletionFamily, CompletionSourceKind, CompletionValidationError, SCHEMA_VERSION, SelectorFamily
 
 
@@ -20,6 +19,7 @@ class CompletionProfile:
     supports_reply_stability: bool
     supports_terminal_reason: bool
     selector_family: SelectorFamily
+    is_hook_expected: bool = False  # TD-008: whether to prioritize hook over detector
 
     def __post_init__(self) -> None:
         provider = (self.provider or '').strip().lower()
@@ -41,6 +41,7 @@ class CompletionProfile:
             'supports_reply_stability': self.supports_reply_stability,
             'supports_terminal_reason': self.supports_terminal_reason,
             'selector_family': self.selector_family.value,
+            'is_hook_expected': self.is_hook_expected,
         }
 
 
