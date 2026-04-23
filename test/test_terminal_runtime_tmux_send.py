@@ -471,3 +471,40 @@ def test_reception_path_H_old_scrollback_req_id_does_not_satisfy(tmp_path):
     assert capture_args_seen, "至少应该 capture 过"
     sample = capture_args_seen[0]
     assert '-S' in sample and '-10' in sample, f"capture-pane 应限定末 10 行，实际命令: {sample}"
+
+def test_reception_path_I_capture_failure_does_not_double_send(tmp_path):
+    """Path I (regression guard): _capture_pane_tail 异常返回 '' 时，
+    D3 不变量 + req_id 检测都得到 False，应走 break→retry 分支，
+    绝不应进补 Enter 分支（防双发）。
+    锁住当前正确行为：未来若有人改 D3 检查或 req_id 判断逻辑，
+    必须保证此 path 仍走 retry。
+    """
+    reception_root = tmp_path / "reception"
+    (reception_root / "events").mkdir(parents=True)
+    artifact = reception_root / "events" / "job_test_i.json"
+    call_count = [0]
+    calls = []
+
+    def tmux_run(args, **kw):
+        calls.append(list(args))
+        if args and args[0] == 'capture-pane':
+            call_count[0] += 1
+            if call_count[0] >= 3:
+                # 第三轮终于成功 capture + reception 出现
+                artifact.write_text("{}")
+                return _cp(stdout="✦ Generating response\n")
+            # 前两轮 capture 失败返回空 stdout（模拟 tmux exception 经 _capture_pane_tail 兜底）
+            return _cp(stdout="")
+        return _cp()
+
+    _build_reception_sender(tmux_run).send_text(
+        '%5', 'CCB_REQ_ID: job_test_i do thing',
+        req_id='job_test_i', reception_dir=reception_root,
+    )
+
+    paste_count = sum(1 for c in calls if c[:1] == ['paste-buffer'])
+    assert paste_count >= 2, "capture 失败两轮应触发至少 1 次 retry（重 paste），实际 paste {paste_count}".format(paste_count=paste_count)
+
+    # 关键：retry 阶段必须有 Esc + C-u（验证走的是 retry 分支不是 补 Enter 分支）
+    sk = [c for c in calls if c[:2] == ['send-keys', '-t']]
+    assert any(c[-1] == 'Escape' for c in sk), "应走 retry 分支（含 Escape），不能误判进 补 Enter 分支"
