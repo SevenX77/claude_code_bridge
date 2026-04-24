@@ -25,6 +25,7 @@ Never raises: all OSError paths degrade to a logged warning.
 """
 from __future__ import annotations
 
+import functools
 import logging
 import os
 from pathlib import Path
@@ -33,6 +34,32 @@ from typing import Literal
 logger = logging.getLogger(__name__)
 
 SUBCGROUP_ENV = "CCB_PER_AGENT_SUBCGROUP"
+
+# cgroup v2 unified hierarchy is mounted at /sys/fs/cgroup when the
+# system runs "unified" mode. The presence of cgroup.controllers at
+# that root is the canonical sign: hybrid mode puts v2 under a child
+# like /sys/fs/cgroup/unified and leaves the root as tmpfs without
+# this file; v1-only systems never create it. Checking this file also
+# probes read permission, which is what callers actually need.
+_CGROUP_V2_ROOT = Path("/sys/fs/cgroup")
+_CGROUP_V2_SENTINEL = _CGROUP_V2_ROOT / "cgroup.controllers"
+
+
+@functools.lru_cache(maxsize=1)
+def _is_cgroup_v2_available() -> bool:
+    """Return True iff this host runs cgroup v2 unified hierarchy.
+
+    Cached for the lifetime of the process: cgroup layout does not
+    change at runtime in practice. Every public entrypoint in this
+    module (is_enabled-gated setup / move calls) short-circuits on
+    False so non-v2 hosts (v1 hybrid, container without cgroup,
+    macOS dev) become a full no-op instead of relying on downstream
+    /proc/self/cgroup parsing to fail silently.
+    """
+    try:
+        return _CGROUP_V2_SENTINEL.is_file()
+    except OSError:
+        return False
 
 DEFAULT_BUDGETS: dict[str, dict[str, int | str]] = {
     "codex":    {"pids_max": 400, "memory_max": "2G"},
@@ -57,6 +84,8 @@ def is_enabled() -> bool:
 
 def supports_cgroup_v2_delegation() -> bool:
     """Check that the process's cgroup has v2 delegation for pids+memory."""
+    if not _is_cgroup_v2_available():
+        return False
     keeper_cg = _resolve_keeper_cgroup()
     if keeper_cg is None:
         return False
@@ -99,6 +128,8 @@ def setup_keeper_subcgroup() -> SetupResult:
     """
     if not is_enabled():
         return "skipped_disabled"
+    if not _is_cgroup_v2_available():
+        return "skipped_unsupported"
     keeper_cg = _resolve_scope_root_cgroup()
     if keeper_cg is None:
         return "skipped_unsupported"
