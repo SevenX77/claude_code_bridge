@@ -64,6 +64,44 @@ class TestSupportsCgroupV2Delegation:
         assert subcgroup.supports_cgroup_v2_delegation() is False
 
 
+class TestSetupKeeperSubcgroup:
+    def test_skipped_when_disabled(self, monkeypatch):
+        monkeypatch.delenv(subcgroup.SUBCGROUP_ENV, raising=False)
+        assert subcgroup.setup_keeper_subcgroup() == "skipped_disabled"
+
+    def test_skipped_when_unsupported(self, monkeypatch):
+        monkeypatch.setenv(subcgroup.SUBCGROUP_ENV, "1")
+        monkeypatch.setattr(subcgroup, "_resolve_keeper_cgroup", lambda: None)
+        assert subcgroup.setup_keeper_subcgroup() == "skipped_unsupported"
+
+    def test_missing_controllers_returns_unsupported(self, mock_cgroup):
+        (mock_cgroup / "cgroup.controllers").write_text("cpu io\n")
+        assert subcgroup.setup_keeper_subcgroup() == "skipped_unsupported"
+
+    def test_setup_creates_keeper_subdir_moves_pid_and_enables_controllers(
+        self, mock_cgroup, monkeypatch
+    ):
+        fake_pid = 98765
+        monkeypatch.setattr(subcgroup.os, "getpid", lambda: fake_pid)
+        result = subcgroup.setup_keeper_subcgroup()
+        assert result == "setup"
+        keeper = mock_cgroup / "keeper"
+        assert keeper.is_dir()
+        assert keeper.joinpath("cgroup.procs").read_text().strip() == str(fake_pid)
+        # subtree_control was written
+        st = mock_cgroup.joinpath("cgroup.subtree_control").read_text()
+        assert "+pids" in st and "+memory" in st
+
+    def test_setup_idempotent_if_keeper_already_exists(
+        self, mock_cgroup, monkeypatch
+    ):
+        # Pre-create keeper/
+        (mock_cgroup / "keeper").mkdir()
+        monkeypatch.setattr(subcgroup.os, "getpid", lambda: 42)
+        # Should still succeed
+        assert subcgroup.setup_keeper_subcgroup() == "setup"
+
+
 class TestMovePidToAgentSubcgroup:
     def test_skipped_when_flag_disabled(self, monkeypatch):
         monkeypatch.delenv(subcgroup.SUBCGROUP_ENV, raising=False)

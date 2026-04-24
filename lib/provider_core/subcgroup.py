@@ -6,6 +6,16 @@ create a sub-cgroup per provider agent and migrate the agent's process
 PID into it. This gives each agent its own `pids.max`/`memory.max`
 budget so one agent's heavy load cannot starve siblings.
 
+Setup sequence (called in order at keeper startup):
+    1. `setup_keeper_subcgroup()` - moves keeper PID into `<scope>/keeper/`
+       so the scope root is empty of processes, then writes
+       `+pids +memory` into `<scope>/cgroup.subtree_control` to enable
+       child controllers. Required by cgroup v2's "no internal processes"
+       rule.
+    2. Per agent spawn: `move_pid_to_agent_subcgroup()` creates
+       `<scope>/agent-<name>/` and migrates the agent's pane shell PID
+       there. Child inherits pids.max/memory.max.
+
 No-op when:
 - Feature flag unset
 - /sys/fs/cgroup/... not reachable
@@ -33,6 +43,10 @@ DEFAULT_BUDGETS: dict[str, dict[str, int | str]] = {
 }
 
 MoveResult = Literal["moved", "skipped_disabled", "skipped_unsupported", "failed"]
+SetupResult = Literal[
+    "setup", "already_setup", "skipped_disabled", "skipped_unsupported", "failed"
+]
+KEEPER_SUBCGROUP_NAME = "keeper"
 
 
 def is_enabled() -> bool:
@@ -64,6 +78,67 @@ def supports_cgroup_v2_delegation() -> bool:
         return subtree_ctrl.is_file() and os.access(str(subtree_ctrl), os.W_OK)
     except OSError:
         return False
+
+
+def setup_keeper_subcgroup() -> SetupResult:
+    """Relocate the current process (keeper) into a `keeper/` sub-cgroup.
+
+    cgroup v2 enforces "no internal processes": a cgroup containing
+    processes directly cannot enable controllers on `cgroup.subtree_control`.
+    To give per-agent sub-cgroups real `pids.max` / `memory.max` budgets,
+    the keeper's scope root must be empty of processes.
+
+    This function:
+    1. Creates `<scope>/keeper/`
+    2. Writes the current PID into `keeper/cgroup.procs`
+    3. Writes `+pids +memory` into `<scope>/cgroup.subtree_control`
+
+    Must be called ONCE at keeper startup, before spawning any agents.
+    Idempotent and best-effort; never raises.
+    """
+    if not is_enabled():
+        return "skipped_disabled"
+    keeper_cg = _resolve_keeper_cgroup()
+    if keeper_cg is None:
+        return "skipped_unsupported"
+
+    controllers_file = keeper_cg / "cgroup.controllers"
+    if not controllers_file.is_file():
+        return "skipped_unsupported"
+    try:
+        controllers = controllers_file.read_text().split()
+    except OSError:
+        return "skipped_unsupported"
+    if "pids" not in controllers or "memory" not in controllers:
+        logger.warning(
+            "setup_keeper_subcgroup: missing controllers %r", controllers
+        )
+        return "skipped_unsupported"
+
+    keeper_sub = keeper_cg / KEEPER_SUBCGROUP_NAME
+    try:
+        keeper_sub.mkdir(exist_ok=True)
+    except OSError as e:
+        logger.warning("setup_keeper_subcgroup: mkdir failed: %s", e)
+        return "failed"
+
+    try:
+        (keeper_sub / "cgroup.procs").write_text(f"{os.getpid()}\n")
+    except OSError as e:
+        logger.warning("setup_keeper_subcgroup: write procs failed: %s", e)
+        return "failed"
+
+    try:
+        (keeper_cg / "cgroup.subtree_control").write_text("+pids +memory\n")
+    except OSError as e:
+        # Could be already enabled (EBUSY or EEXIST), which is fine
+        logger.info(
+            "setup_keeper_subcgroup: subtree_control already configured or unwritable: %s", e
+        )
+
+    logger.info("setup_keeper_subcgroup: moved keeper pid %d into %s",
+                os.getpid(), keeper_sub)
+    return "setup"
 
 
 def move_pid_to_agent_subcgroup(
