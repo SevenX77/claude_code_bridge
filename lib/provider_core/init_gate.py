@@ -107,6 +107,81 @@ class InitGate:
         """Return the failure reason after INIT_FAIL."""
         return self._last_reason
 
+    def tick(self) -> InitGateState:
+        """Single non-blocking state machine step.
+        
+        Performs one probe attempt if in INITIALIZING state, updates steady-state
+        counters, and returns the current state immediately without sleeping.
+        
+        Returns:
+            Current InitGateState after this tick.
+        """
+        state = self._state
+        
+        # Terminal states: no-op
+        if state in (InitGateState.READY, InitGateState.INIT_FAIL):
+            return state
+        
+        # LAUNCHED -> INITIALIZING transition
+        if state == InitGateState.LAUNCHED:
+            self._state = InitGateState.INITIALIZING
+            self._start_time = self.clock()
+            if self.bypass:
+                self._log_warn("[InitGate] BYPASS enabled — skipping ready detection")
+                self._state = InitGateState.READY
+                return InitGateState.READY
+            self.log_fn(
+                f"[InitGate] waiting for {self.provider} TUI "
+                f"(deadline: {self.deadline_s}s, "
+                f"poll: {self.poll_fast_ms}ms→{self.poll_slow_ms}ms@{self.poll_switch_s}s) ..."
+            )
+            return InitGateState.INITIALIZING
+        
+        # INITIALIZING state: check deadline and probe
+        now = self.clock()
+        elapsed = now - self._start_time
+        
+        # Check deadline
+        if elapsed >= self.deadline_s:
+            self._record_failure(
+                reason="deadline_exceeded",
+                elapsed_s=elapsed,
+                probes=self._probes_attempted,
+            )
+            self._state = InitGateState.INIT_FAIL
+            self._last_reason = "deadline_exceeded"
+            return InitGateState.INIT_FAIL
+        
+        # Probe
+        try:
+            detected = self.probe.detect()
+        except Exception:
+            detected = False
+        
+        self._probes_attempted.append(
+            _ProbeAttempt(t_offset_s=round(elapsed, 3), detected=detected)
+        )
+        
+        # Capture pane for diagnostics
+        try:
+            capture = self.capture_fn()
+            self._recent_captures.append(
+                _CaptureEntry(t_offset_s=round(elapsed, 3), capture=capture)
+            )
+        except Exception:
+            pass
+        
+        # Update steady-state counter
+        if detected:
+            self._consecutive_positives = getattr(self, '_consecutive_positives', 0) + 1
+            if self._consecutive_positives >= self.steady_count:
+                self._state = InitGateState.READY
+                return InitGateState.READY
+        else:
+            self._consecutive_positives = 0
+        
+        return InitGateState.INITIALIZING
+    
     def wait_until_ready(self) -> bool:
         """Run the init gate until READY or INIT_FAIL.
 

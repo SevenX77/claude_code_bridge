@@ -394,3 +394,141 @@ class TestEnvVarLoading:
         monkeypatch.setenv("CCB_INIT_GATE_BYPASS", "0")
         kwargs = load_init_gate_env("codex")
         assert kwargs["bypass"] is False
+
+
+class FakeProbe(InitGateProbe):
+    """Probe driven by a sequence of bool returns; tracks call_count.
+
+    Used by tick() tests where we need to drive specific patterns.
+    """
+
+    def __init__(self, sequence: list[bool]) -> None:
+        self._sequence = list(sequence)
+        self._idx = 0
+        self.call_count = 0
+
+    def detect(self) -> bool:
+        self.call_count += 1
+        if self._idx < len(self._sequence):
+            value = self._sequence[self._idx]
+            self._idx += 1
+            return value
+        return self._sequence[-1] if self._sequence else False
+
+
+class TestTickAPI:
+    """Tests for non-blocking tick() API (Q3-S1b.1)."""
+
+    def test_tick_idempotent_when_terminal(self) -> None:
+        """tick() is idempotent for terminal states (READY/INIT_FAIL)."""
+        probe = FakeProbe([True, True])  # Will return True
+        gate = InitGate(
+            probe=probe,
+            provider="codex",
+            runtime_dir=Path("/tmp/test_runtime"),
+            capture_fn=lambda: "mock capture",
+            deadline_s=10.0,
+            poll_fast_ms=100,
+            poll_slow_ms=200,
+            poll_switch_s=5.0,
+            steady_count=2,
+            bypass=False,
+            clock=lambda: 0.0,
+        )
+        
+        # Manually set to READY
+        gate._state = InitGateState.READY
+        
+        # Call tick() 5 times
+        for _ in range(5):
+            state = gate.tick()
+            assert state == InitGateState.READY
+        
+        # probe.detect() should never have been called
+        assert probe.call_count == 0
+
+    def test_tick_no_sleep(self) -> None:
+        """tick() never calls sleep_fn."""
+        sleep_calls: list[float] = []
+        
+        def mock_sleep(secs: float) -> None:
+            sleep_calls.append(secs)
+        
+        probe = FakeProbe([False, True, True])
+        gate = InitGate(
+            probe=probe,
+            provider="codex",
+            runtime_dir=Path("/tmp/test_runtime"),
+            capture_fn=lambda: "mock capture",
+            deadline_s=10.0,
+            poll_fast_ms=100,
+            poll_slow_ms=200,
+            poll_switch_s=5.0,
+            steady_count=2,
+            bypass=False,
+            clock=lambda: 0.0,
+            sleep_fn=mock_sleep,
+        )
+        
+        # Tick through multiple states
+        # First tick: LAUNCHED -> INITIALIZING
+        gate.tick()
+        # Second tick: INITIALIZING (probe returns False)
+        gate.tick()
+        # Third tick: INITIALIZING (probe returns True)
+        gate.tick()
+        
+        # sleep_fn should never have been called
+        assert len(sleep_calls) == 0
+
+    def test_tick_state_machine_progression(self) -> None:
+        """tick() advances state machine step by step."""
+        # Probe returns False once, then True twice — matches the
+        # tick-by-tick assertions below (Tick 2=False, Tick 3=True#1,
+        # Tick 4=True#2 → steady_count hits, READY).
+        probe = FakeProbe([False, True, True])
+        
+        gate = InitGate(
+            probe=probe,
+            provider="codex",
+            runtime_dir=Path("/tmp/test_runtime"),
+            capture_fn=lambda: "mock capture",
+            deadline_s=10.0,
+            poll_fast_ms=100,
+            poll_slow_ms=200,
+            poll_switch_s=5.0,
+            steady_count=2,
+            bypass=False,
+            clock=lambda: 0.0,
+        )
+        
+        # Initial state: LAUNCHED
+        assert gate._state == InitGateState.LAUNCHED
+        
+        # Tick 1: LAUNCHED -> INITIALIZING
+        state = gate.tick()
+        assert state == InitGateState.INITIALIZING
+        assert gate._state == InitGateState.INITIALIZING
+        
+        # Tick 2: INITIALIZING (probe=False, no steady yet)
+        state = gate.tick()
+        assert state == InitGateState.INITIALIZING
+        assert gate._state == InitGateState.INITIALIZING
+        assert probe.call_count == 1
+        
+        # Tick 3: INITIALIZING (probe=True, count=1)
+        state = gate.tick()
+        assert state == InitGateState.INITIALIZING
+        assert gate._state == InitGateState.INITIALIZING
+        assert probe.call_count == 2
+        
+        # Tick 4: INITIALIZING (probe=True, count=2 -> hits steady_count)
+        state = gate.tick()
+        assert state == InitGateState.READY
+        assert gate._state == InitGateState.READY
+        assert probe.call_count == 3
+        
+        # Tick 5: READY (terminal, idempotent)
+        state = gate.tick()
+        assert state == InitGateState.READY
+        assert probe.call_count == 3  # No additional probe call
