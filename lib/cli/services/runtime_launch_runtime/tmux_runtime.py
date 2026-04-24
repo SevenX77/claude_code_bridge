@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+from provider_core.subcgroup import (
+    is_enabled as subcgroup_is_enabled,
+    move_pid_to_agent_subcgroup,
+)
 from terminal_runtime.tmux_identity import apply_ccb_pane_identity
 
 from .tmux_backend import prepared_state, run_cwd, tmux_backend
@@ -12,6 +17,42 @@ from .tmux_panes import (
     pane_meets_minimum_size,
     prepare_detached_tmux_server,
 )
+
+_logger = logging.getLogger(__name__)
+
+
+def _best_effort_migrate_agent_subcgroup(backend, pane_id: str, spec) -> None:
+    """Move the agent's tmux pane process into a per-agent cgroup v2 sub-dir.
+
+    Feature-flagged via CCB_PER_AGENT_SUBCGROUP=1; harmless no-op when off
+    or when the keeper scope lacks cgroup v2 delegation. Never raises -
+    any failure is logged and swallowed so the agent launch itself is
+    unaffected.
+    """
+    if not subcgroup_is_enabled():
+        return
+    try:
+        result = backend._tmux_run(  # type: ignore[attr-defined]
+            ['display-message', '-p', '-t', pane_id, '#{pane_pid}'],
+            capture=True,
+            timeout=1.0,
+        )
+    except Exception as e:  # noqa: BLE001
+        _logger.warning("subcgroup: display-message failed for %s: %s", pane_id, e)
+        return
+    pane_pid = (result.stdout or '').strip()
+    if not pane_pid.isdigit():
+        _logger.warning("subcgroup: pane_pid not numeric for %s: %r", pane_id, pane_pid)
+        return
+    try:
+        outcome = move_pid_to_agent_subcgroup(int(pane_pid), spec.name, spec.provider)
+    except Exception as e:  # noqa: BLE001
+        _logger.warning("subcgroup: move_pid_to_agent_subcgroup raised: %s", e)
+        return
+    _logger.info(
+        "subcgroup: agent=%s provider=%s pid=%s outcome=%s",
+        spec.name, spec.provider, pane_pid, outcome,
+    )
 
 
 def launch_tmux_runtime(
@@ -59,6 +100,7 @@ def launch_tmux_runtime(
         best_effort_kill_tmux_pane_fn=best_effort_kill_tmux_pane_fn,
         allow_detached_fallback=allow_detached_fallback,
     )
+    _best_effort_migrate_agent_subcgroup(backend, pane_id, spec)
     apply_ccb_pane_identity(
         backend,
         pane_id,
