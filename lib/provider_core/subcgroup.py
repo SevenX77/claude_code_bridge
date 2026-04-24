@@ -122,23 +122,51 @@ def setup_keeper_subcgroup() -> SetupResult:
         logger.warning("setup_keeper_subcgroup: mkdir failed: %s", e)
         return "failed"
 
-    try:
-        (keeper_sub / "cgroup.procs").write_text(f"{os.getpid()}\n")
-    except OSError as e:
-        logger.warning("setup_keeper_subcgroup: write procs failed: %s", e)
-        return "failed"
+    # Move ALL scope-root PIDs (including this process and any sibling
+    # daemons like ccb CLI, ccbd daemon_process) into keeper/. cgroup v2
+    # "no internal processes" rule requires the scope root be empty of
+    # processes BEFORE we can enable `+pids +memory` on subtree_control.
+    _drain_scope_root_into_keeper(keeper_cg, keeper_sub)
 
     try:
         (keeper_cg / "cgroup.subtree_control").write_text("+pids +memory\n")
     except OSError as e:
-        # Could be already enabled (EBUSY or EEXIST), which is fine
-        logger.info(
-            "setup_keeper_subcgroup: subtree_control already configured or unwritable: %s", e
+        # Still failing means some child races with us - log and continue.
+        # agent-<name> children will still work IF subtree_control is
+        # already enabled from a previous run.
+        logger.warning(
+            "setup_keeper_subcgroup: subtree_control write failed: %s "
+            "(agent limits may not enforce)", e,
         )
 
-    logger.info("setup_keeper_subcgroup: moved keeper pid %d into %s",
-                os.getpid(), keeper_sub)
+    logger.info("setup_keeper_subcgroup: moved scope-root procs into %s",
+                keeper_sub)
     return "setup"
+
+
+def _drain_scope_root_into_keeper(scope_cg: Path, keeper_sub: Path) -> None:
+    """Move every PID currently in scope root into keeper/.
+
+    Retry up to 3 passes because children can be forked between reads.
+    """
+    procs_file = scope_cg / "cgroup.procs"
+    keeper_procs_file = keeper_sub / "cgroup.procs"
+    for _ in range(3):
+        try:
+            root_pids = procs_file.read_text().split()
+        except OSError:
+            return
+        if not root_pids:
+            return
+        for pid in root_pids:
+            if not pid.isdigit():
+                continue
+            try:
+                keeper_procs_file.write_text(f"{pid}\n")
+            except OSError:
+                # Process may have exited, or cgroup may have raced.
+                # Non-fatal; next pass will catch remaining.
+                continue
 
 
 def move_pid_to_agent_subcgroup(
