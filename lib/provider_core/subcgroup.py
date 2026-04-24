@@ -90,17 +90,24 @@ def setup_keeper_subcgroup() -> SetupResult:
 
     This function:
     1. Creates `<scope>/keeper/`
-    2. Writes the current PID into `keeper/cgroup.procs`
+    2. Moves ALL scope-root PIDs into `keeper/cgroup.procs`
     3. Writes `+pids +memory` into `<scope>/cgroup.subtree_control`
 
-    Must be called ONCE at keeper startup, before spawning any agents.
-    Idempotent and best-effort; never raises.
+    Idempotent and best-effort; never raises. If the caller is already
+    inside `keeper/`, returns "already_setup" without creating a nested
+    `keeper/keeper/`.
     """
     if not is_enabled():
         return "skipped_disabled"
-    keeper_cg = _resolve_keeper_cgroup()
+    keeper_cg = _resolve_scope_root_cgroup()
     if keeper_cg is None:
         return "skipped_unsupported"
+
+    # If our cgroup is already the keeper sub-dir, subsequent setup calls
+    # are no-ops (the scope root above us is already configured).
+    my_cg = _resolve_keeper_cgroup()
+    if my_cg is not None and my_cg.name == KEEPER_SUBCGROUP_NAME:
+        return "already_setup"
 
     controllers_file = keeper_cg / "cgroup.controllers"
     if not controllers_file.is_file():
@@ -183,7 +190,9 @@ def move_pid_to_agent_subcgroup(
     if not supports_cgroup_v2_delegation():
         return "skipped_unsupported"
 
-    keeper_cg = _resolve_keeper_cgroup()
+    # Agent cgroups are created as siblings of keeper/ under the scope root,
+    # not inside the caller's current cgroup (which may itself be keeper/).
+    keeper_cg = _resolve_scope_root_cgroup()
     if keeper_cg is None:  # pragma: no cover (supports_... already checks this)
         return "skipped_unsupported"
 
@@ -263,6 +272,16 @@ def _resolve_keeper_cgroup() -> Path | None:
             relative = parts[2].lstrip("/")
             return Path("/sys/fs/cgroup") / relative
     return None
+
+
+def _resolve_scope_root_cgroup() -> Path | None:
+    """Return the scope-root cgroup (one level above keeper/ if we're inside it)."""
+    current = _resolve_keeper_cgroup()
+    if current is None:
+        return None
+    if current.name == KEEPER_SUBCGROUP_NAME:
+        return current.parent
+    return current
 
 
 def _parse_memory_size(value: str) -> str:

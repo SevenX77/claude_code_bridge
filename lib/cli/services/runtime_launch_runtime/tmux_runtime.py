@@ -6,6 +6,7 @@ from pathlib import Path
 from provider_core.subcgroup import (
     is_enabled as subcgroup_is_enabled,
     move_pid_to_agent_subcgroup,
+    setup_keeper_subcgroup,
 )
 from terminal_runtime.tmux_identity import apply_ccb_pane_identity
 
@@ -31,6 +32,10 @@ def _best_effort_migrate_agent_subcgroup(backend, pane_id: str, spec) -> None:
     """
     if not subcgroup_is_enabled():
         return
+    # Idempotent: ensures scope root is drained into keeper/ and +pids
+    # +memory are enabled on subtree_control before we try to migrate
+    # the agent. Safe to call repeatedly.
+    setup_keeper_subcgroup()
     try:
         result = backend._tmux_run(  # type: ignore[attr-defined]
             ['display-message', '-p', '-t', pane_id, '#{pane_pid}'],
