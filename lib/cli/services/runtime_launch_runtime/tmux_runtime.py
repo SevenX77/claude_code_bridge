@@ -32,6 +32,18 @@ def _best_effort_migrate_agent_subcgroup(backend, pane_id: str, spec) -> None:
     """
     if not subcgroup_is_enabled():
         return
+    # _tmux_run is a non-public method on TmuxBackend. Public query APIs
+    # (describe_pane / is_pane_alive) do not expose #{pane_pid}, so we
+    # have to drop down to the raw runner. Probe hasattr instead of
+    # silently swallowing AttributeError inside the generic except below
+    # so the fallback is explicit and upstream refactors of the backend
+    # surface cleanly rather than appearing as a flaky display-message.
+    if not hasattr(backend, '_tmux_run'):
+        _logger.warning(
+            "subcgroup: backend %s lacks _tmux_run; skipping per-agent migration for %s",
+            type(backend).__name__, pane_id,
+        )
+        return
     # Idempotent: ensures scope root is drained into keeper/ and +pids
     # +memory are enabled on subtree_control before we try to migrate
     # the agent. Safe to call repeatedly.
