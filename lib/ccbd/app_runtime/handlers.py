@@ -6,6 +6,7 @@ from ccbd.handlers import (
     build_cancel_handler,
     build_get_handler,
     build_inbox_handler,
+    build_init_state_handler,
     build_ping_handler,
     build_queue_handler,
     build_resubmit_handler,
@@ -29,6 +30,7 @@ def register_handlers(app) -> None:
     app.socket_server.register_handler('resubmit', build_resubmit_handler(app.dispatcher))
     app.socket_server.register_handler('retry', build_retry_handler(app.dispatcher))
     app.socket_server.register_handler('inbox', build_inbox_handler(app.dispatcher))
+    app.socket_server.register_handler('init_state', build_init_state_handler(app.init_gate_driver))
     app.socket_server.register_handler('ack', build_ack_handler(app.dispatcher))
     app.socket_server.register_handler('cancel', build_cancel_handler(app.dispatcher))
     app.socket_server.register_handler(

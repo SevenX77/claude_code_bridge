@@ -30,6 +30,7 @@ from fault_injection import FaultInjectionService
 from heartbeat import HeartbeatPolicy, HeartbeatStateStore
 from project.ids import compute_project_id
 from provider_core.catalog import build_default_provider_catalog
+from provider_core.init_gate_driver import InitGateDriver
 from provider_execution.registry import build_default_execution_registry
 from provider_execution.service import ExecutionService
 from provider_execution.state_store import ExecutionStateStore
@@ -146,6 +147,11 @@ def initialize_app(app, project_root: str | Path, *, clock, pid: int | None) -> 
     )
     app.socket_server = CcbdSocketServer(app.paths.ccbd_socket_path)
     app.socket_server.set_request_guard(lambda op: rejection_for_request(app, op))
+    # Q3 Stage 1b Step 3: ccbd-internal driver for per-agent InitGate state machines.
+    # Initially empty; registration of gates is wired up in a follow-up step
+    # (the actual mount-flow integration point is still being investigated).
+    # Until then, init_state RPC reports `registered=False` for every agent.
+    app.init_gate_driver = InitGateDriver()
     app.lease = None
     register_handlers(app)
 

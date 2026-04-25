@@ -75,6 +75,9 @@ def heartbeat(app):
     app.dispatcher.tick()
     app.dispatcher.poll_completions()
     app.job_heartbeat.tick(app.dispatcher)
+    # Q3 Stage 1b Step 3: advance per-agent InitGate state machines.
+    # Driver isolates per-gate exceptions; safe to call unconditionally.
+    app.init_gate_driver.tick_all()
     app.lease = app.mount_manager.refresh_heartbeat(
         expected_pid=app.pid,
         expected_daemon_instance_id=app.daemon_instance_id,

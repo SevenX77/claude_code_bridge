@@ -107,6 +107,30 @@ class InitGate:
         """Return the failure reason after INIT_FAIL."""
         return self._last_reason
 
+    @property
+    def state(self) -> InitGateState:
+        """Return current state without advancing the state machine.
+
+        Use this for read-only state queries (e.g., RPC responses).
+        For driving the state machine forward, use ``tick()`` instead.
+        """
+        return self._state
+
+    def force_fail(self, reason: str) -> None:
+        """Force the gate into INIT_FAIL with the given reason.
+
+        Used by external supervisors (e.g. InitGateDriver) when a tick
+        raises an exception — the gate is marked failed in-place rather
+        than letting the exception propagate up the heartbeat loop.
+
+        Idempotent on already-terminal gates: READY stays READY (do not
+        clobber a successful gate); INIT_FAIL takes the latest reason.
+        """
+        if self._state == InitGateState.READY:
+            return
+        self._state = InitGateState.INIT_FAIL
+        self._last_reason = reason
+
     def tick(self) -> InitGateState:
         """Single non-blocking state machine step.
         
