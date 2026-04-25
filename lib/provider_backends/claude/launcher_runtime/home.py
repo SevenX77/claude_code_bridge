@@ -101,6 +101,8 @@ def _prepare_managed_home(source_home: Path, target_layout: ClaudeHomeLayout, *,
 
     _materialize_settings(source_home, target_layout, profile=profile)
     _materialize_trust(source_home, target_layout)
+    if _inherits_auth(profile):
+        _symlink_credentials(source_home, target_layout)
     if _inherits_commands(profile):
         _copytree_if_missing(source_home / '.claude' / 'commands', target_layout.claude_dir / 'commands')
     if _inherits_skills(profile):
@@ -125,6 +127,40 @@ def _materialize_trust(source_home: Path, target_layout: ClaudeHomeLayout) -> No
     if not target_layout.trust_path.exists() and source_trust.is_file():
         _copy_if_missing(source_trust, target_layout.trust_path)
     _ensure_trust_file(target_layout.trust_path)
+
+
+def _symlink_credentials(source_home: Path, target_layout: ClaudeHomeLayout) -> None:
+    """Symlink ~/.claude/.credentials.json into the agent's claude_dir.
+
+    Symlink (rather than copy) so Claude Code's OAuth token refresh
+    writes back to the user's credentials file — the agent shares login
+    state with the user. Skips silently if source absent. Replaces a
+    stale copy left by older CCB versions or a wrong symlink target.
+    """
+    source = source_home / '.claude' / '.credentials.json'
+    if not source.is_file():
+        return
+    target = target_layout.claude_dir / '.credentials.json'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_symlink():
+        try:
+            if target.resolve() == source.resolve():
+                return
+        except Exception:
+            pass
+        try:
+            target.unlink()
+        except Exception:
+            return
+    elif target.exists():
+        try:
+            target.unlink()
+        except Exception:
+            return
+    try:
+        target.symlink_to(source)
+    except Exception:
+        return
 
 
 def _projected_settings_payload(source_settings_path: Path, *, profile) -> dict[str, object] | None:
