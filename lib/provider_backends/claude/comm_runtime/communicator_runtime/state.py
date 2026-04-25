@@ -17,6 +17,11 @@ def initialize_state(
         raise RuntimeError("❌ No active Claude session found. Run 'ccb claude' (or add claude to ccb.config) first")
 
     comm.session_id = str(comm.session_info.get("claude_session_id") or "").strip()
+    # Q3 Stage 1c: agent_name needed for init_state RPC query in
+    # _send_via_terminal. Falls back to "" when missing (env-launched
+    # session_info from older launchers may not carry agent_name); the
+    # caller treats "" as "skip gate query".
+    comm.agent_name = str(comm.session_info.get("agent_name") or "").strip()
     comm.terminal = comm.session_info.get("terminal", "tmux")
     comm.pane_id = get_pane_id_from_session_fn(comm.session_info) or ""
     comm.pane_title_marker = comm.session_info.get("pane_title_marker") or ""

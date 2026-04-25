@@ -72,12 +72,16 @@ class TestRegisterProviderInitGateForAgent:
         assert result is False
         assert app.init_gate_driver.registered_count() == 0
 
-    def test_claude_is_no_op_pending_stage_1c(self, tmp_path):
+    def test_claude_registers_after_stage_1c(self, tmp_path):
+        # Stage 1c flipped claude from no-op to real registration.
         app = _build_app(tmp_path)
-        app.registry.add(_runtime('a1', provider='claude'))
-        result = register_provider_init_gate_for_agent(app, 'a1')
-        assert result is False
-        assert app.init_gate_driver.registered_count() == 0
+        app.registry.add(_runtime('a3', provider='claude'))
+        result = register_provider_init_gate_for_agent(app, 'a3')
+        assert result is True
+        assert app.init_gate_driver.registered_count() == 1
+        # runtime_dir for claude lives under provider-runtime/claude/
+        expected = tmp_path / 'a3' / 'provider-runtime' / 'claude'
+        assert expected.is_dir()
 
     def test_unknown_provider_logs_warning_and_skips(self, tmp_path, caplog):
         app = _build_app(tmp_path)

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+from provider_core.init_gate_client import InitGateOutcome, wait_for_init_ready
 from provider_core.protocol import is_done_text, make_req_id, strip_done_text
 from terminal_runtime import get_backend_for_session, get_pane_id_from_session
 
@@ -20,6 +22,8 @@ from . import (
     remember_claude_session as _remember_claude_session_impl,
     remember_claude_session_binding,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _claude_log_reader_cls():
@@ -86,8 +90,60 @@ class ClaudeCommunicator:
     def _send_via_terminal(self, content: str) -> bool:
         if not self.backend or not self.pane_id:
             raise RuntimeError("Terminal session not configured")
+        # Q3 Stage 1c: ask ccbd whether the agent's TUI is ready before
+        # pasting. READY → fast path. Anything else (FAILED /
+        # NOT_REGISTERED / TIMEOUT / QUERY_ERROR) → log + fall through to
+        # whatever the existing send pipeline does. Mirror of Gemini Step 4.
+        self._wait_for_init_gate_ready_or_warn()
         self.backend.send_text(self.pane_id, content)
         return True
+
+    def _wait_for_init_gate_ready_or_warn(self) -> None:
+        """Best-effort init-gate query before paste. See Gemini Step 4 docs."""
+        agent_name = (getattr(self, "agent_name", "") or "").strip()
+        if not agent_name:
+            return
+        socket_path = self._resolve_ccbd_socket_path()
+        if socket_path is None:
+            return
+        try:
+            from ccbd.socket_client import CcbdClient
+        except Exception:  # pragma: no cover — defensive import guard
+            return
+        try:
+            client = CcbdClient(socket_path)
+        except Exception:
+            return
+        outcome = wait_for_init_ready(client, agent_name)
+        if outcome == InitGateOutcome.READY:
+            return
+        logger.warning(
+            "init_gate: action=fall_through agent=%s outcome=%s; "
+            "downstream send pipeline will validate delivery",
+            agent_name, outcome.name,
+        )
+
+    def _resolve_ccbd_socket_path(self) -> str | None:
+        """Find ccbd socket: explicit field first, then walk-up fallback."""
+        info = getattr(self, "session_info", None)
+        if not isinstance(info, dict):
+            return None
+        explicit = str(info.get("ccbd_socket_path") or "").strip()
+        if explicit:
+            return explicit
+        for key in ("start_dir", "work_dir"):
+            candidate = info.get(key)
+            if not candidate:
+                continue
+            p = Path(str(candidate))
+            for ancestor in [p, *p.parents]:
+                if (ancestor / ".ccb").is_dir():
+                    try:
+                        from storage.paths import PathLayout
+                        return str(PathLayout(ancestor).ccbd_socket_path)
+                    except Exception:
+                        return None
+        return None
 
     def _remember_claude_session(self, session_path: Path) -> None:
         _remember_claude_session_impl(
