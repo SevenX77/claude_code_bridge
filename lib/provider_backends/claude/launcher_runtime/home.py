@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import shutil
 
+from launcher.sandbox_home import sandbox_home_for_runtime_dir
 from provider_profiles import provider_api_env_keys
 
 from ..home_layout import ClaudeHomeLayout, claude_layout_for_home, claude_layout_from_session_data
@@ -15,7 +16,7 @@ def resolve_claude_home_layout(runtime_dir: Path, profile) -> ClaudeHomeLayout:
     if explicit_runtime_home is not None:
         return claude_layout_for_home(explicit_runtime_home)
 
-    managed_home = _managed_isolated_home(runtime_dir)
+    managed_home = sandbox_home_for_runtime_dir(runtime_dir)
     existing = _existing_layout(runtime_dir, managed_home=managed_home)
     if existing is not None:
         return existing
@@ -34,9 +35,10 @@ def prepare_claude_home_overrides(runtime_dir: Path, profile) -> dict[str, str]:
 
 
 def materialize_claude_home_config(target_home: Path, *, profile=None, source_home: Path | None = None) -> ClaudeHomeLayout:
+    del profile
+    del source_home
     layout = claude_layout_for_home(Path(target_home).expanduser())
-    source_root = Path(source_home).expanduser() if source_home is not None else _system_home_root()
-    _prepare_managed_home(source_root, layout, profile=profile)
+    _prepare_managed_home(layout)
     return layout
 
 
@@ -58,13 +60,6 @@ def _existing_layout(runtime_dir: Path, *, managed_home: Path) -> ClaudeHomeLayo
     if layout is None:
         return None
     return layout if _is_within_home_root(layout.home_root, managed_home) else None
-
-
-def _managed_isolated_home(runtime_dir: Path) -> Path:
-    state_dir = state_dir_for_runtime_dir(runtime_dir)
-    if state_dir is not None:
-        return state_dir / 'home'
-    return Path(runtime_dir).expanduser() / 'claude-home'
 
 
 def _is_within_home_root(candidate: Path, managed_home: Path) -> bool:
@@ -89,24 +84,12 @@ def _normalize_path(value: object) -> Path | None:
             return None
 
 
-def _prepare_managed_home(source_home: Path, target_layout: ClaudeHomeLayout, *, profile) -> None:
+def _prepare_managed_home(target_layout: ClaudeHomeLayout) -> None:
     target_layout.home_root.mkdir(parents=True, exist_ok=True)
     target_layout.claude_dir.mkdir(parents=True, exist_ok=True)
     target_layout.projects_root.mkdir(parents=True, exist_ok=True)
     target_layout.session_env_root.mkdir(parents=True, exist_ok=True)
-
-    if target_layout.home_root == source_home.expanduser():
-        _ensure_trust_file(target_layout.trust_path)
-        return
-
-    _materialize_settings(source_home, target_layout, profile=profile)
-    _materialize_trust(source_home, target_layout)
-    if _inherits_auth(profile):
-        _symlink_credentials(source_home, target_layout)
-    if _inherits_commands(profile):
-        _copytree_if_missing(source_home / '.claude' / 'commands', target_layout.claude_dir / 'commands')
-    if _inherits_skills(profile):
-        _copy_if_missing(source_home / '.claude' / 'CLAUDE.md', target_layout.claude_dir / 'CLAUDE.md')
+    _ensure_trust_file(target_layout.trust_path)
 
 
 def _materialize_settings(source_home: Path, target_layout: ClaudeHomeLayout, *, profile) -> None:

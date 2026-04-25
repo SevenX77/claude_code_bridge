@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 import shlex
+from pathlib import Path
 
 from agents.models import PermissionMode, QueuePolicy, RestoreMode, RuntimeMode, WorkspaceMode
 from cli.models import ParsedStartCommand
+from project.ids import compute_project_id
 from provider_backends.gemini import launcher as gemini_launcher
 from provider_backends.gemini.launcher_runtime.env import build_gemini_env_prefix
 from provider_backends.gemini.launcher_runtime.home import resolve_gemini_home_layout
 from provider_profiles import ResolvedProviderProfile
 from agents.models import AgentSpec
+import pytest
 
 
 def test_build_gemini_env_prefix_clears_non_inherited_api_and_exports_filtered_keys() -> None:
@@ -46,6 +49,15 @@ def _spec(name: str = 'agent1') -> AgentSpec:
     )
 
 
+@pytest.fixture(autouse=True)
+def _sandbox_cache_home(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / '.xdg-cache'))
+
+
+def _project_sandbox_home(tmp_path: Path, project_root: Path) -> Path:
+    return tmp_path / '.xdg-cache' / 'ccb' / 'sandboxes' / compute_project_id(project_root)[:12]
+
+
 def test_gemini_launcher_build_start_cmd_exports_managed_home(tmp_path) -> None:
     runtime_dir = tmp_path / 'runtime'
     runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -54,7 +66,7 @@ def test_gemini_launcher_build_start_cmd_exports_managed_home(tmp_path) -> None:
 
     start_cmd = gemini_launcher.build_start_cmd(command, spec, runtime_dir, 'gemini-sess-home')
 
-    expected_home = runtime_dir / 'gemini-home'
+    expected_home = _project_sandbox_home(tmp_path, tmp_path)
     expected_root = expected_home / '.gemini' / 'tmp'
     assert f'HOME={shlex.quote(str(expected_home))}' in start_cmd
     assert f'GEMINI_ROOT={shlex.quote(str(expected_root))}' in start_cmd
@@ -68,7 +80,7 @@ def test_gemini_launcher_build_start_cmd_uses_agent_provider_state_home_for_mana
 
     start_cmd = gemini_launcher.build_start_cmd(command, spec, runtime_dir, 'gemini-sess-home')
 
-    expected_home = tmp_path / '.ccb' / 'agents' / 'agent1' / 'provider-state' / 'gemini' / 'home'
+    expected_home = _project_sandbox_home(tmp_path, tmp_path)
     expected_root = expected_home / '.gemini' / 'tmp'
     assert f'HOME={shlex.quote(str(expected_home))}' in start_cmd
     assert f'GEMINI_ROOT={shlex.quote(str(expected_root))}' in start_cmd
@@ -92,5 +104,5 @@ def test_resolve_gemini_home_layout_rejects_non_managed_persisted_home(tmp_path)
 
     layout = resolve_gemini_home_layout(runtime_dir, None)
 
-    expected_home = tmp_path / '.ccb' / 'agents' / 'agent1' / 'provider-state' / 'gemini' / 'home'
+    expected_home = _project_sandbox_home(tmp_path, tmp_path)
     assert layout.home_root == expected_home

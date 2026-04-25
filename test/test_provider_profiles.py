@@ -103,10 +103,8 @@ def test_materialize_claude_home_config_projects_system_settings_into_managed_ho
 
     layout = materialize_claude_home_config(target_home, source_home=source_home)
 
-    payload = json.loads(layout.settings_path.read_text(encoding='utf-8'))
-    assert payload['env']['ANTHROPIC_AUTH_TOKEN'] == 'system-token'
-    assert payload['env']['ANTHROPIC_BASE_URL'] == 'https://claude.example.test'
-    assert payload['theme'] == 'light'
+    assert layout.settings_path.exists() is False
+    assert json.loads(layout.trust_path.read_text(encoding='utf-8')) == {}
 
 
 def test_materialize_claude_home_config_preserves_runtime_hooks_and_permissions(tmp_path: Path) -> None:
@@ -142,8 +140,6 @@ def test_materialize_claude_home_config_preserves_runtime_hooks_and_permissions(
     layout = materialize_claude_home_config(target_home, source_home=source_home)
 
     payload = json.loads(layout.settings_path.read_text(encoding='utf-8'))
-    assert payload['env']['ANTHROPIC_AUTH_TOKEN'] == 'system-token'
-    assert payload['theme'] == 'dark'
     assert payload['hooks']['Stop'][0]['hooks'][0]['command'] == 'echo hook'
     assert payload['permissions']['allow'] == ['Bash(ls)']
 
@@ -213,9 +209,7 @@ def test_materialize_gemini_home_config_projects_system_settings_into_managed_ho
     layout = materialize_gemini_home_config(target_home, source_home=source_home)
 
     payload = json.loads(layout.settings_path.read_text(encoding='utf-8'))
-    assert payload['env']['GEMINI_API_KEY'] == 'system-gemini-key'
-    assert payload['env']['GOOGLE_API_KEY'] == 'system-google-key'
-    assert payload['theme'] == 'Default'
+    assert payload == {}
 
 
 def test_materialize_gemini_home_config_preserves_runtime_hooks(tmp_path: Path) -> None:
@@ -254,8 +248,6 @@ def test_materialize_gemini_home_config_preserves_runtime_hooks(tmp_path: Path) 
     layout = materialize_gemini_home_config(target_home, source_home=source_home)
 
     payload = json.loads(layout.settings_path.read_text(encoding='utf-8'))
-    assert payload['env']['GEMINI_API_KEY'] == 'system-gemini-key'
-    assert payload['theme'] == 'Atom One'
     assert payload['hooks']['AfterAgent'][0]['hooks'][0]['command'] == 'echo hook'
 
 
@@ -278,5 +270,4 @@ def test_materialize_gemini_home_config_merges_trusted_folders(tmp_path: Path) -
     layout = materialize_gemini_home_config(target_home, source_home=source_home)
 
     payload = json.loads(layout.trusted_folders_path.read_text(encoding='utf-8'))
-    assert payload['/system/project'] == 'TRUST_FOLDER'
     assert payload['/managed/project'] == 'TRUST_FOLDER'

@@ -56,6 +56,8 @@ def _home_for_session_root(session_root: Path) -> Path:
     normalized_root = Path(session_root).expanduser()
     if normalized_root.name == "sessions":
         parent = normalized_root.parent
+        if parent.name == ".codex":
+            return parent
         if parent.name == "home":
             return parent
         return parent / "home"

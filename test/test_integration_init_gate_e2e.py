@@ -64,7 +64,12 @@ def _build_client(workspace: Path):
     if sock is None:
         pytest.skip(f"ccbd not mounted at {workspace}/.ccb/ccbd/ccbd.sock")
     from ccbd.socket_client import CcbdClient
-    return CcbdClient(sock, timeout_s=3.0)
+    client = CcbdClient(sock, timeout_s=3.0)
+    try:
+        client.ping("ccbd")
+    except Exception as exc:
+        pytest.skip(f"ccbd socket is not connectable in this environment: {exc}")
+    return client
 
 
 def _agent_provider_runtime_dir(workspace: Path, agent: str, provider: str) -> Path:

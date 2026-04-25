@@ -7,9 +7,11 @@ from pathlib import Path
 
 from agents.models import AgentSpec, PermissionMode, QueuePolicy, RestoreMode, RuntimeMode, WorkspaceMode
 from cli.models import ParsedStartCommand
+from project.ids import compute_project_id
 from provider_backends.claude import launcher as claude_launcher
 from provider_backends.claude.launcher_runtime.history import ClaudeHistoryLocator
 from provider_backends.gemini import launcher as gemini_launcher
+import pytest
 
 
 def _spec(name: str, provider: str) -> AgentSpec:
@@ -26,13 +28,22 @@ def _spec(name: str, provider: str) -> AgentSpec:
     )
 
 
+@pytest.fixture(autouse=True)
+def _sandbox_cache_home(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / '.xdg-cache'))
+
+
+def _project_sandbox_home(tmp_path: Path, project_root: Path) -> Path:
+    return tmp_path / '.xdg-cache' / 'ccb' / 'sandboxes' / compute_project_id(project_root)[:12]
+
+
 def test_claude_restore_prefers_project_session_work_dir(monkeypatch, tmp_path: Path) -> None:
     project_root = tmp_path / 'repo'
     runtime_dir = project_root / '.ccb' / 'agents' / 'reviewer' / 'provider-runtime' / 'claude'
     workspace_path = project_root / '.ccb' / 'workspaces' / 'reviewer'
     runtime_dir.mkdir(parents=True)
     workspace_path.mkdir(parents=True)
-    managed_home = project_root / '.ccb' / 'agents' / 'reviewer' / 'provider-state' / 'claude' / 'home'
+    managed_home = _project_sandbox_home(tmp_path, project_root)
 
     session_path = project_root / '.ccb' / '.claude-reviewer-session'
     session_path.parent.mkdir(parents=True, exist_ok=True)
@@ -75,7 +86,7 @@ def test_claude_restore_uses_runtime_managed_home_for_fresh_agent(monkeypatch, t
     workspace_path = project_root / '.ccb' / 'workspaces' / 'reviewer'
     runtime_dir.mkdir(parents=True)
     workspace_path.mkdir(parents=True)
-    managed_home = project_root / '.ccb' / 'agents' / 'reviewer' / 'provider-state' / 'claude' / 'home'
+    managed_home = _project_sandbox_home(tmp_path, project_root)
     project_dir = managed_home / '.claude' / 'projects' / ''.join(ch if ch.isalnum() else '-' for ch in str(workspace_path))
     session_env_root = managed_home / '.claude' / 'session-env'
     project_dir.mkdir(parents=True)
@@ -102,7 +113,7 @@ def test_gemini_restore_prefers_project_session_work_dir(monkeypatch, tmp_path: 
     workspace_path = project_root / '.ccb' / 'workspaces' / 'reviewer'
     runtime_dir.mkdir(parents=True)
     workspace_path.mkdir(parents=True)
-    managed_home = project_root / '.ccb' / 'agents' / 'reviewer' / 'provider-state' / 'gemini' / 'home'
+    managed_home = _project_sandbox_home(tmp_path, project_root)
     managed_root = managed_home / '.gemini' / 'tmp'
 
     session_path = project_root / '.ccb' / '.gemini-reviewer-session'
@@ -143,7 +154,7 @@ def test_gemini_restore_uses_runtime_managed_home_for_fresh_agent(monkeypatch, t
     workspace_path = project_root / '.ccb' / 'workspaces' / 'reviewer'
     runtime_dir.mkdir(parents=True)
     workspace_path.mkdir(parents=True)
-    managed_home = project_root / '.ccb' / 'agents' / 'reviewer' / 'provider-state' / 'gemini' / 'home'
+    managed_home = _project_sandbox_home(tmp_path, project_root)
     managed_root = managed_home / '.gemini' / 'tmp'
     project_hash = hashlib.sha256(str(workspace_path).encode()).hexdigest()
     chats_dir = managed_root / project_hash / 'chats'
@@ -241,7 +252,7 @@ def test_claude_build_start_cmd_ignores_non_managed_persisted_home(monkeypatch, 
         'launch-1',
     )
 
-    expected_home = tmp_path / 'repo' / '.ccb' / 'agents' / 'reviewer' / 'provider-state' / 'claude' / 'home'
+    expected_home = _project_sandbox_home(tmp_path, tmp_path / 'repo')
     assert f'HOME={expected_home}' in cmd
 
 

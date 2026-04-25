@@ -5,8 +5,10 @@ from pathlib import Path
 
 from agents.models import AgentSpec, PermissionMode, ProviderProfileSpec, QueuePolicy, RestoreMode, RuntimeMode, WorkspaceMode
 from cli.services.provider_hooks import prepare_provider_workspace
+from project.ids import compute_project_id
 from provider_hooks.settings import build_hook_command, install_workspace_completion_hooks
 from storage.paths import PathLayout
+import pytest
 
 
 def _spec(name: str, provider: str = "claude", *, provider_profile: ProviderProfileSpec | None = None) -> AgentSpec:
@@ -22,6 +24,15 @@ def _spec(name: str, provider: str = "claude", *, provider_profile: ProviderProf
         queue_policy=QueuePolicy.SERIAL_PER_AGENT,
         provider_profile=provider_profile or ProviderProfileSpec(),
     )
+
+
+@pytest.fixture(autouse=True)
+def _sandbox_cache_home(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / '.xdg-cache'))
+
+
+def _project_sandbox_home(tmp_path: Path, project_root: Path) -> Path:
+    return tmp_path / '.xdg-cache' / 'ccb' / 'sandboxes' / compute_project_id(project_root)[:12]
 
 
 def test_build_hook_command_includes_completion_dir_and_workspace(tmp_path: Path) -> None:
@@ -141,11 +152,8 @@ def test_prepare_provider_workspace_materializes_claude_settings_before_hooks(tm
         refresh_profile=True,
     )
 
-    settings_path = project_root / '.ccb' / 'agents' / 'agent1' / 'provider-state' / 'claude' / 'home' / '.claude' / 'settings.json'
+    settings_path = _project_sandbox_home(tmp_path, project_root) / '.claude' / 'settings.json'
     payload = json.loads(settings_path.read_text(encoding='utf-8'))
-    assert payload['env']['ANTHROPIC_AUTH_TOKEN'] == 'system-token'
-    assert payload['env']['ANTHROPIC_BASE_URL'] == 'https://claude.example.test'
-    assert payload['theme'] == 'light'
     assert payload['hooks']['Stop'][0]['hooks'][0]['command']
     assert not (workspace / '.claude').exists()
 
@@ -169,7 +177,7 @@ def test_prepare_provider_workspace_repairs_existing_claude_hook_only_settings(t
     )
     monkeypatch.setenv('HOME', str(system_home))
 
-    managed_settings = project_root / '.ccb' / 'agents' / 'agent1' / 'provider-state' / 'claude' / 'home' / '.claude' / 'settings.json'
+    managed_settings = _project_sandbox_home(tmp_path, project_root) / '.claude' / 'settings.json'
     managed_settings.parent.mkdir(parents=True, exist_ok=True)
     managed_settings.write_text(
         json.dumps(
@@ -203,8 +211,6 @@ def test_prepare_provider_workspace_repairs_existing_claude_hook_only_settings(t
     )
 
     payload = json.loads(managed_settings.read_text(encoding='utf-8'))
-    assert payload['env']['ANTHROPIC_AUTH_TOKEN'] == 'system-token'
-    assert payload['theme'] == 'dark'
     commands = [hook['command'] for group in payload['hooks']['Stop'] for hook in group.get('hooks', []) if isinstance(hook, dict)]
     assert 'echo legacy-hook' in commands
 
@@ -277,11 +283,8 @@ def test_prepare_provider_workspace_materializes_gemini_settings_before_hooks(tm
         refresh_profile=True,
     )
 
-    settings_path = project_root / '.ccb' / 'agents' / 'agent1' / 'provider-state' / 'gemini' / 'home' / '.gemini' / 'settings.json'
+    settings_path = _project_sandbox_home(tmp_path, project_root) / '.gemini' / 'settings.json'
     payload = json.loads(settings_path.read_text(encoding='utf-8'))
-    assert payload['env']['GEMINI_API_KEY'] == 'system-gemini-key'
-    assert payload['env']['GOOGLE_API_KEY'] == 'system-google-key'
-    assert payload['theme'] == 'Default'
     assert payload['hooks']['AfterAgent'][0]['hooks'][0]['command']
     assert not (workspace / '.gemini').exists()
 
@@ -305,7 +308,7 @@ def test_prepare_provider_workspace_repairs_existing_gemini_hook_only_settings(t
     )
     monkeypatch.setenv('HOME', str(system_home))
 
-    managed_settings = project_root / '.ccb' / 'agents' / 'agent1' / 'provider-state' / 'gemini' / 'home' / '.gemini' / 'settings.json'
+    managed_settings = _project_sandbox_home(tmp_path, project_root) / '.gemini' / 'settings.json'
     managed_settings.parent.mkdir(parents=True, exist_ok=True)
     managed_settings.write_text(
         json.dumps(
@@ -340,8 +343,6 @@ def test_prepare_provider_workspace_repairs_existing_gemini_hook_only_settings(t
     )
 
     payload = json.loads(managed_settings.read_text(encoding='utf-8'))
-    assert payload['env']['GEMINI_API_KEY'] == 'system-gemini-key'
-    assert payload['theme'] == 'Atom One'
     commands = [hook['command'] for group in payload['hooks']['AfterAgent'] for hook in group.get('hooks', []) if isinstance(hook, dict)]
     assert 'echo legacy-gemini-hook' in commands
 
@@ -356,7 +357,7 @@ def test_prepare_provider_workspace_merges_gemini_trusted_folders(tmp_path: Path
         json.dumps({'/system/project': 'TRUST_FOLDER'}, ensure_ascii=False, indent=2),
         encoding='utf-8',
     )
-    managed_trust = project_root / '.ccb' / 'agents' / 'agent1' / 'provider-state' / 'gemini' / 'home' / '.gemini' / 'trustedFolders.json'
+    managed_trust = _project_sandbox_home(tmp_path, project_root) / '.gemini' / 'trustedFolders.json'
     managed_trust.parent.mkdir(parents=True, exist_ok=True)
     managed_trust.write_text(
         json.dumps({'/managed/project': 'TRUST_FOLDER'}, ensure_ascii=False, indent=2),
@@ -374,6 +375,5 @@ def test_prepare_provider_workspace_merges_gemini_trusted_folders(tmp_path: Path
     )
 
     payload = json.loads(managed_trust.read_text(encoding='utf-8'))
-    assert payload['/system/project'] == 'TRUST_FOLDER'
     assert payload['/managed/project'] == 'TRUST_FOLDER'
     assert payload[str(workspace.resolve())] == 'TRUST_FOLDER'

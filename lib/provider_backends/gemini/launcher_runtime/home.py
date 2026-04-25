@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from launcher.sandbox_home import sandbox_home_for_runtime_dir
 from provider_profiles import provider_api_env_keys
 
 from ..home_layout import GeminiHomeLayout, gemini_layout_for_home, gemini_layout_from_session_data
@@ -14,7 +15,7 @@ def resolve_gemini_home_layout(runtime_dir: Path, profile) -> GeminiHomeLayout:
     if explicit_runtime_home is not None:
         return gemini_layout_for_home(explicit_runtime_home)
 
-    managed_home = _managed_isolated_home(runtime_dir)
+    managed_home = sandbox_home_for_runtime_dir(runtime_dir)
     existing = _existing_layout(runtime_dir, managed_home=managed_home)
     if existing is not None:
         return existing
@@ -49,13 +50,6 @@ def _existing_layout(runtime_dir: Path, *, managed_home: Path) -> GeminiHomeLayo
     if layout is None:
         return None
     return layout if _is_within_home_root(layout.home_root, managed_home) else None
-
-
-def _managed_isolated_home(runtime_dir: Path) -> Path:
-    state_dir = state_dir_for_runtime_dir(runtime_dir)
-    if state_dir is not None:
-        return state_dir / 'home'
-    return Path(runtime_dir).expanduser() / 'gemini-home'
 
 
 def _is_within_home_root(candidate: Path, managed_home: Path) -> bool:
@@ -96,12 +90,10 @@ def _ensure_json_file(path: Path) -> None:
 
 
 def materialize_gemini_home_config(target_home: Path, *, profile=None, source_home: Path | None = None) -> GeminiHomeLayout:
+    del profile
+    del source_home
     layout = gemini_layout_for_home(target_home)
     _prepare_managed_home(layout)
-    source_root = Path(source_home).expanduser() if source_home is not None else _system_home_root()
-    if layout.home_root != source_root:
-        _materialize_settings(source_root, layout, profile=profile)
-        _materialize_trusted_folders(source_root, layout)
     return layout
 
 

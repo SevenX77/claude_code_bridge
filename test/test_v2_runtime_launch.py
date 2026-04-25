@@ -59,6 +59,15 @@ def _context(project_root: Path, command: ParsedStartCommand) -> CliContext:
     return CliContext(command=command, cwd=project_root, project=project, paths=PathLayout(project_root))
 
 
+@pytest.fixture(autouse=True)
+def _sandbox_cache_home(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / '.xdg-cache'))
+
+
+def _project_sandbox_home(tmp_path: Path, project_root: Path) -> Path:
+    return tmp_path / '.xdg-cache' / 'ccb' / 'sandboxes' / compute_project_id(project_root)[:12]
+
+
 def _write_provider_profile(runtime_dir: Path, profile: ResolvedProviderProfile) -> None:
     runtime_dir.mkdir(parents=True, exist_ok=True)
     (runtime_dir / 'provider-profile.json').write_text(
@@ -97,7 +106,7 @@ def test_ensure_agent_runtime_configures_claude_managed_home_without_touching_wo
     )
 
     observed: dict[str, object] = {}
-    managed_settings = ctx.paths.agent_provider_state_dir('agent3', 'claude') / 'home' / '.claude' / 'settings.json'
+    managed_settings = _project_sandbox_home(tmp_path, project_root) / '.claude' / 'settings.json'
 
     def fake_ensure_impl(*args, **kwargs):
         del args, kwargs
@@ -174,7 +183,7 @@ def test_ensure_agent_runtime_launches_named_codex_session(monkeypatch, tmp_path
     expected_session = project_root / '.ccb' / '.codex-agent1-session'
     assert result.binding.session_ref == str(expected_session)
     payload = json.loads(expected_session.read_text(encoding='utf-8'))
-    expected_codex_home = ctx.paths.agent_provider_state_dir('agent1', 'codex') / 'home'
+    expected_codex_home = _project_sandbox_home(tmp_path, project_root) / '.codex'
     expected_session_root = expected_codex_home / 'sessions'
     assert payload['pane_id'] == '%42'
     assert payload['agent_name'] == 'agent1'
@@ -190,6 +199,7 @@ def test_ensure_agent_runtime_launches_named_codex_session(monkeypatch, tmp_path
     assert payload['codex_start_cmd'].startswith('export ')
     assert 'disable_paste_burst=true' in payload['codex_start_cmd']
     assert spawned['kwargs']['env']['CCB_SESSION_FILE'] == str(expected_session)
+    assert spawned['kwargs']['env']['HOME'] == str(expected_codex_home.parent)
     assert spawned['kwargs']['env']['CODEX_HOME'] == str(expected_codex_home)
     assert spawned['kwargs']['env']['CODEX_SESSION_ROOT'] == str(expected_session_root)
     expected_lib_root = str((Path(codex_launcher.__file__).resolve().parents[2]))
@@ -400,7 +410,7 @@ def test_ensure_agent_runtime_rewrites_session_file_without_losing_existing_code
 ) -> None:
     project_root = tmp_path / 'repo-rewrite-preserve'
     (project_root / '.ccb').mkdir(parents=True)
-    existing_home = project_root / '.ccb' / 'agents' / 'agent1' / 'provider-state' / 'codex' / 'home'
+    existing_home = _project_sandbox_home(tmp_path, project_root) / '.codex'
     existing_root = existing_home / 'sessions'
     existing_log = existing_root / '2026' / '04' / '19' / 'rollout-existing-session.jsonl'
     existing_log.parent.mkdir(parents=True, exist_ok=True)
@@ -678,7 +688,7 @@ def test_ensure_agent_runtime_launches_named_claude_session(monkeypatch, tmp_pat
     expected_session = project_root / '.ccb' / '.claude-reviewer-session'
     assert result.binding.session_ref == str(expected_session)
     payload = json.loads(expected_session.read_text(encoding='utf-8'))
-    expected_claude_home = ctx.paths.agent_provider_state_dir('reviewer', 'claude') / 'home'
+    expected_claude_home = _project_sandbox_home(tmp_path, project_root)
     assert payload['agent_name'] == 'reviewer'
     assert payload['ccb_project_id'] == ctx.project.project_id
     assert payload['completion_artifact_dir'] == str(ctx.paths.agent_dir('reviewer') / 'provider-runtime' / 'claude' / 'completion')
@@ -1282,10 +1292,9 @@ def test_codex_launcher_build_start_cmd_isolates_invalid_global_codex_config(mon
 
     cmd = codex_launcher.build_start_cmd(command, spec, runtime_dir, 'sess-1')
 
-    isolated_home = runtime_dir / 'codex-state' / 'home'
+    isolated_home = _project_sandbox_home(tmp_path, tmp_path) / '.codex'
     assert f'CODEX_HOME={shlex.quote(str(isolated_home))}' in cmd
     assert f'CODEX_SESSION_ROOT={shlex.quote(str(isolated_home / "sessions"))}' in cmd
-    assert (isolated_home / 'auth.json').is_file()
     assert (isolated_home / 'config.toml').is_file()
 
 
@@ -1302,7 +1311,7 @@ def test_codex_launcher_build_start_cmd_uses_agent_scoped_session_root_by_defaul
 
     cmd = codex_launcher.build_start_cmd(command, spec, runtime_dir, 'sess-default')
 
-    codex_home = runtime_dir.parents[1] / 'provider-state' / 'codex' / 'home'
+    codex_home = _project_sandbox_home(tmp_path, tmp_path / 'repo') / '.codex'
     session_root = codex_home / 'sessions'
     assert f'CODEX_HOME={shlex.quote(str(codex_home))}' in cmd
     assert f'CODEX_SESSION_ROOT={shlex.quote(str(session_root))}' in cmd
@@ -1481,17 +1490,15 @@ def test_codex_launcher_build_start_cmd_refreshes_managed_home_projection(monkey
 
     codex_launcher.build_start_cmd(command, spec, runtime_dir, 'sess-refresh-1')
 
-    isolated_home = runtime_dir / 'codex-state' / 'home'
-    assert (isolated_home / 'config.toml').read_text(encoding='utf-8') == 'model = "gpt-5"\n'
-    assert (isolated_home / 'auth.json').read_text(encoding='utf-8') == '{"OPENAI_API_KEY":"old-key"}\n'
+    isolated_home = _project_sandbox_home(tmp_path, tmp_path) / '.codex'
+    assert (isolated_home / 'config.toml').read_text(encoding='utf-8') == '# ccb agent-local codex config\n'
 
     (source_home / 'config.toml').write_text('model = "gpt-5.1"\n', encoding='utf-8')
     (source_home / 'auth.json').write_text('{"OPENAI_API_KEY":"new-key"}\n', encoding='utf-8')
 
     codex_launcher.build_start_cmd(command, spec, runtime_dir, 'sess-refresh-2')
 
-    assert (isolated_home / 'config.toml').read_text(encoding='utf-8') == 'model = "gpt-5.1"\n'
-    assert (isolated_home / 'auth.json').read_text(encoding='utf-8') == '{"OPENAI_API_KEY":"new-key"}\n'
+    assert (isolated_home / 'config.toml').read_text(encoding='utf-8') == '# ccb agent-local codex config\n'
 
 
 def test_codex_launcher_build_start_cmd_reuses_legacy_codex_home_from_persisted_start_cmd(tmp_path: Path) -> None:
@@ -1518,8 +1525,9 @@ def test_codex_launcher_build_start_cmd_reuses_legacy_codex_home_from_persisted_
 
     cmd = codex_launcher.build_start_cmd(command, spec, runtime_dir, 'sess-legacy-home')
 
-    assert f'CODEX_HOME={shlex.quote(str(legacy_home))}' in cmd
-    assert f'CODEX_SESSION_ROOT={shlex.quote(str(legacy_home / "sessions"))}' in cmd
+    expected_home = _project_sandbox_home(tmp_path, project_root) / '.codex'
+    assert f'CODEX_HOME={shlex.quote(str(expected_home))}' in cmd
+    assert f'CODEX_SESSION_ROOT={shlex.quote(str(expected_home / "sessions"))}' in cmd
 
 
 def test_codex_launcher_build_start_cmd_reuses_legacy_session_root_from_persisted_log_path(tmp_path: Path) -> None:
@@ -1548,12 +1556,10 @@ def test_codex_launcher_build_start_cmd_reuses_legacy_session_root_from_persiste
 
     cmd = codex_launcher.build_start_cmd(command, spec, runtime_dir, 'sess-legacy-root')
 
-    migrated_home = legacy_root.parent / 'home'
-    migrated_root = migrated_home / 'sessions'
-    assert f'CODEX_HOME={shlex.quote(str(migrated_home))}' in cmd
-    assert f'CODEX_SESSION_ROOT={shlex.quote(str(migrated_root))}' in cmd
-    assert migrated_root.is_dir()
-    assert (migrated_root / '2026' / '04' / '19' / 'rollout-legacy-session.jsonl').is_file()
+    expected_home = _project_sandbox_home(tmp_path, project_root) / '.codex'
+    expected_root = expected_home / 'sessions'
+    assert f'CODEX_HOME={shlex.quote(str(expected_home))}' in cmd
+    assert f'CODEX_SESSION_ROOT={shlex.quote(str(expected_root))}' in cmd
 
 
 def test_claude_launcher_build_start_cmd_uses_isolated_profile_api_env(monkeypatch, tmp_path: Path) -> None:

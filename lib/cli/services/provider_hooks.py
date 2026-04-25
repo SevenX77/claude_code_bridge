@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 
+from launcher.sandbox_home import sandbox_home_for_project_root
 from provider_backends.claude.launcher_runtime import materialize_claude_home_config, resolve_claude_home_layout
 from provider_backends.gemini.launcher_runtime.home import materialize_gemini_home_config
 from provider_hooks.settings import build_hook_command, install_workspace_completion_hooks
@@ -156,9 +157,10 @@ def provider_hook_home_root(
 
 
 def resolve_gemini_home_root(*, layout, agent_name: str, resolved_profile: ResolvedProviderProfile | None) -> Path:
+    del agent_name
     if resolved_profile is not None and resolved_profile.runtime_home_path is not None:
         return resolved_profile.runtime_home_path
-    return layout.agent_provider_state_dir(agent_name, 'gemini') / 'home'
+    return sandbox_home_for_project_root(layout.project_root)
 
 
 __all__ = [

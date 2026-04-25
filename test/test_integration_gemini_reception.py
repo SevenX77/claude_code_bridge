@@ -17,6 +17,8 @@ def test_gemini_reception_artifact_appears_within_5s(tmp_path: Path) -> None:
     ccbd_root = Path(workspace) / '.ccb'
     if not (ccbd_root / 'ccbd').exists():
         pytest.skip("ccbd not mounted; set CCB_TEST_WORKSPACE or start ccbd manually")
+    if not os.access(ccbd_root / 'ccbd', os.W_OK):
+        pytest.skip(f"ccbd root is not writable: {ccbd_root / 'ccbd'}")
     
     reception_dir = ccbd_root / 'agents' / 'a2' / 'provider-runtime' / 'gemini' / 'reception'
     if not reception_dir.exists():

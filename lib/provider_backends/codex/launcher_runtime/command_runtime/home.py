@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import shutil
 
+from launcher.sandbox_home import sandbox_home_for_runtime_dir
 try:  # pragma: no branch
     import tomllib as _toml_reader
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
@@ -36,24 +37,27 @@ def resolve_codex_home_layout(runtime_dir: Path, profile) -> CodexHomeLayout:
             session_root=explicit_runtime_home / 'sessions',
         )
 
-    existing = _existing_layout(runtime_dir)
+    managed_home = _managed_isolated_home(runtime_dir)
+    existing = _existing_layout(runtime_dir, managed_home=managed_home)
     if existing is not None:
         return existing
 
-    isolated_home = _managed_isolated_home(runtime_dir)
     return CodexHomeLayout(
-        codex_home=isolated_home,
-        session_root=isolated_home / 'sessions',
+        codex_home=managed_home / '.codex',
+        session_root=managed_home / '.codex' / 'sessions',
     )
 
 
 def prepare_codex_home_overrides(runtime_dir: Path, profile) -> dict[str, str]:
     layout = resolve_codex_home_layout(runtime_dir, profile)
+    sandbox_home = layout.codex_home.parent
+    sandbox_home.mkdir(parents=True, exist_ok=True)
     layout.codex_home.mkdir(parents=True, exist_ok=True)
     layout.session_root.mkdir(parents=True, exist_ok=True)
-    _prepare_managed_home(_system_codex_home(), layout.codex_home)
+    _prepare_managed_home(layout.codex_home)
 
     return {
+        'HOME': str(sandbox_home),
         'CODEX_HOME': str(layout.codex_home),
         'CODEX_SESSION_ROOT': str(layout.session_root),
     }
@@ -66,14 +70,17 @@ def _profile_runtime_home(profile) -> Path | None:
     return Path(runtime_home).expanduser()
 
 
-def _existing_layout(runtime_dir: Path) -> CodexHomeLayout | None:
+def _existing_layout(runtime_dir: Path, managed_home: Path) -> CodexHomeLayout | None:
     session_file = session_file_for_runtime_dir(runtime_dir)
     if session_file is None or not session_file.is_file():
         return None
     data = read_session_payload(session_file)
     if not isinstance(data, dict):
         return None
-    return _layout_from_payload(data)
+    layout = _layout_from_payload(data)
+    if layout is None:
+        return None
+    return layout if _is_within_home_root(layout.codex_home, managed_home) else None
 
 
 def _layout_from_payload(data: dict[str, object]) -> CodexHomeLayout | None:
@@ -167,11 +174,37 @@ def _managed_state_dir(runtime_dir: Path) -> Path:
 
 
 def _managed_isolated_home(runtime_dir: Path) -> Path:
-    return _managed_state_dir(runtime_dir) / 'home'
+    return sandbox_home_for_runtime_dir(runtime_dir)
+
+
+def _is_within_home_root(candidate: Path, managed_home: Path) -> bool:
+    normalized_candidate = _normalize_path(candidate)
+    normalized_managed = _normalize_path(managed_home)
+    if normalized_candidate is None or normalized_managed is None:
+        return False
+    try:
+        normalized_candidate.relative_to(normalized_managed)
+        return True
+    except Exception:
+        return False
+
+
+def _normalize_path(value: object) -> Path | None:
+    try:
+        return Path(value).expanduser().resolve()
+    except Exception:
+        try:
+            return Path(value).expanduser()
+        except Exception:
+            return None
+
+
 def _legacy_root_to_home(session_root: Path) -> Path:
     normalized_root = Path(session_root).expanduser()
     if normalized_root.name == 'sessions':
         parent = normalized_root.parent
+        if parent.name == '.codex':
+            return parent
         if parent.name == 'home':
             return parent
         return parent / 'home'
@@ -196,21 +229,12 @@ def _migrate_legacy_session_root(source_root: Path, target_root: Path) -> None:
         normalized_target.mkdir(parents=True, exist_ok=True)
 
 
-def _system_codex_home() -> Path:
-    return Path(os.environ.get('CODEX_HOME') or (Path.home() / '.codex')).expanduser()
-
-
-def _prepare_managed_home(source_home: Path, target_home: Path) -> None:
+def _prepare_managed_home(target_home: Path) -> None:
     target_home.mkdir(parents=True, exist_ok=True)
     (target_home / 'sessions').mkdir(parents=True, exist_ok=True)
     target_config = target_home / 'config.toml'
-    if _source_config_valid(source_home / 'config.toml'):
-        _sync_file(source_home / 'config.toml', target_config)
-    elif not target_config.exists():
+    if not target_config.exists():
         target_config.write_text('# ccb agent-local codex config\n', encoding='utf-8')
-    _sync_auth_file(source_home / 'auth.json', target_home / 'auth.json')
-    _sync_tree(source_home / 'skills', target_home / 'skills')
-    _sync_tree(source_home / 'commands', target_home / 'commands')
 
 
 def _source_config_valid(config_path: Path) -> bool:
