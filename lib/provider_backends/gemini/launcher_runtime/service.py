@@ -99,6 +99,7 @@ def build_session_payload(
         "ccb_session_id": launch_session_id,
         "agent_name": spec.name,
         "ccb_project_id": context.project.project_id,
+        "ccbd_socket_path": str(context.paths.ccbd_socket_path),
         "runtime_dir": str(runtime_dir),
         "completion_artifact_dir": str(runtime_dir / "completion"),
         "terminal": "tmux",

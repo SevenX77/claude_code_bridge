@@ -124,6 +124,10 @@ def _payload_restore(agent_name: str) -> dict:
     return {'agent_name': agent_name}
 
 
+def _payload_init_state(agent_name: str) -> dict:
+    return {'agent_name': agent_name}
+
+
 def _payload_ping(target: str = 'ccbd') -> dict:
     return {'target': target}
 
@@ -150,6 +154,7 @@ client_endpoints = {
     'start': ('start', _payload_start),
     'attach': ('attach', _payload_attach),
     'restore': ('restore', _payload_restore),
+    'init_state': ('init_state', _payload_init_state),
     'ping': ('ping', _payload_ping),
     'shutdown': ('shutdown', _payload_shutdown),
     'stop_all': ('stop-all', _payload_stop_all),

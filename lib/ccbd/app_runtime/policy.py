@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ccbd.services.init_gate_registration import register_provider_init_gates_for_started
 from ccbd.services.start_policy import CcbdStartPolicy, recovery_start_options as recovery_start_options_impl
 
 
@@ -25,19 +26,23 @@ def recovery_start_options(app) -> tuple[bool, bool]:
 
 def mount_agent_from_policy(app, agent_name: str) -> None:
     restore, auto_permission = recovery_start_options(app)
-    app.runtime_supervisor.start(
+    summary = app.runtime_supervisor.start(
         agent_names=(agent_name,),
         restore=restore,
         auto_permission=auto_permission,
         cleanup_tmux_orphans=False,
         interactive_tmux_layout=False,
     )
+    # Q3 Stage 1b Step 4: register InitGates for newly-started agents so
+    # ccbd's heartbeat starts ticking them immediately. Best-effort: a
+    # registration failure must never break the mount flow.
+    register_provider_init_gates_for_started(app, getattr(summary, 'started', ()) or ())
 
 
 def remount_project_from_policy(app, reason: str) -> None:
     restore, auto_permission = recovery_start_options(app)
     reason_text = str(reason or '').strip()
-    app.runtime_supervisor.start(
+    summary = app.runtime_supervisor.start(
         agent_names=tuple(app.config.agents),
         restore=restore,
         auto_permission=auto_permission,
@@ -47,6 +52,7 @@ def remount_project_from_policy(app, reason: str) -> None:
         reflow_workspace=reason_text.startswith('pane_recovery:'),
         recreate_reason=reason_text,
     )
+    register_provider_init_gates_for_started(app, getattr(summary, 'started', ()) or ())
 
 
 __all__ = [

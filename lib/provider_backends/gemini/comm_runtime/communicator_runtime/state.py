@@ -17,6 +17,11 @@ def initialize_state(
         raise RuntimeError("❌ No active Gemini session found, please run ccb gemini (or add gemini to ccb.config) first")
 
     comm.ccb_session_id = comm.session_info["ccb_session_id"]
+    # Q3 Stage 1b Step 4: agent_name needed for init_state RPC query in
+    # _send_via_terminal. Falls back to "" when missing (env-launched
+    # session_info from older launchers may not carry agent_name); the
+    # caller in communicator_facade treats "" as "skip gate query".
+    comm.agent_name = str(comm.session_info.get("agent_name") or "").strip()
     comm.runtime_dir = Path(comm.session_info["runtime_dir"])
     comm.terminal = comm.session_info.get("terminal", "tmux")
     comm.pane_id = get_pane_id_from_session_fn(comm.session_info)

@@ -72,3 +72,12 @@ def test_handler_works_with_real_driver_unknown_agent():
         "failed": False,
         "failure_reason": None,
     }
+
+
+def test_init_state_endpoint_registered_in_client_endpoints():
+    """Q3 Stage 1b Step 4: CcbdClient must be able to dispatch init_state."""
+    from ccbd.socket_client_runtime.endpoints import client_endpoints
+    assert 'init_state' in client_endpoints
+    op_name, payload_fn = client_endpoints['init_state']
+    assert op_name == 'init_state'
+    assert payload_fn('a1') == {'agent_name': 'a1'}
