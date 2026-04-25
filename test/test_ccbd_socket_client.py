@@ -5,7 +5,8 @@ import pytest
 from ccbd.socket_client import CcbdClient, CcbdClientError
 
 
-def test_ccbd_client_uses_stable_default_timeout(tmp_path) -> None:
+def test_ccbd_client_uses_stable_default_timeout(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("CCB_CCBD_CLIENT_TIMEOUT_S", raising=False)
     client = CcbdClient(tmp_path / "ccbd.sock")
     assert client._timeout_s == 3.0
 

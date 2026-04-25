@@ -68,6 +68,9 @@ def _ccbd_env(*, keeper_pid: int | None) -> dict[str, str]:
     env['PYTHONPATH'] = lib_root if not current_pythonpath else lib_root + os.pathsep + current_pythonpath
     if keeper_pid is not None and keeper_pid > 0:
         env['CCB_KEEPER_PID'] = str(int(keeper_pid))
+    owner_pid = str(os.environ.get('CCB_MASTER_CLAUDE_PID') or '').strip()
+    if owner_pid.isdigit() and int(owner_pid) > 0:
+        env['CCB_MASTER_CLAUDE_PID'] = owner_pid
     return env
 
 

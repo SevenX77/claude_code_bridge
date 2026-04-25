@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from agents.models import AgentState
 from ccbd.models import CcbdShutdownReport, CcbdStartupReport, cleanup_summaries_from_objects
@@ -26,6 +27,7 @@ def start(app):
         )
         try:
             app.socket_server.listen()
+            _write_owner_lockfile(app)
         except Exception as exc:
             app.lease = release_backend_ownership(app)
             _mark_lifecycle_failed(app, failure_reason=str(exc))
@@ -124,6 +126,7 @@ def mark_current_daemon_unmounted(app):
 def release_backend_ownership(app):
     lease = mark_current_daemon_unmounted(app)
     app.socket_server.shutdown()
+    _remove_owner_lockfile(app.paths.ccbd_owner_lockfile_path)
     _mark_lifecycle_unmounted(app)
     return lease
 
@@ -376,6 +379,27 @@ def _mark_lifecycle_failed(app, *, failure_reason: str) -> None:
             last_failure_reason=failure_reason,
         )
     )
+
+
+def _write_owner_lockfile(app) -> None:
+    owner_pid = int(getattr(app, 'master_claude_pid', 0) or 0)
+    if owner_pid <= 0:
+        owner_pid = int(getattr(app, 'keeper_pid', 0) or 0)
+    if owner_pid <= 0:
+        owner_pid = os.getppid()
+    path = app.paths.ccbd_owner_lockfile_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f'pid={owner_pid}\nstarted_at={app.clock()}\n',
+        encoding='utf-8',
+    )
+
+
+def _remove_owner_lockfile(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 __all__ = [

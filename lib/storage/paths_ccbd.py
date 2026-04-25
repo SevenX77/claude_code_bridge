@@ -90,6 +90,10 @@ class CcbdMountPathMixin:
         return self._project_socket_path('ccbd')
 
     @property
+    def ccbd_owner_lockfile_path(self):
+        return self.ccbd_socket_path.with_suffix('.owner')
+
+    @property
     def ccbd_state_path(self):
         return self.ccbd_dir / 'state.json'
 

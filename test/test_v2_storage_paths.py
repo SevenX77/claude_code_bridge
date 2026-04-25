@@ -13,6 +13,7 @@ def test_path_layout_uses_project_scoped_locations(tmp_path: Path) -> None:
     assert layout.ccbd_lifecycle_path == layout.ccb_dir / 'ccbd' / 'lifecycle.json'
     assert layout.ccbd_lease_path == layout.ccb_dir / 'ccbd' / 'lease.json'
     assert layout.ccbd_socket_path.name in {'ccbd.sock', f'ccbd-{layout.project_socket_key}.sock'}
+    assert layout.ccbd_owner_lockfile_path.name in {'ccbd.owner', f'ccbd-{layout.project_socket_key}.owner'}
     assert len(os.fsencode(str(layout.ccbd_socket_path))) <= 100
     assert layout.ccbd_state_path == layout.ccb_dir / 'ccbd' / 'state.json'
     assert layout.ccbd_start_policy_path == layout.ccb_dir / 'ccbd' / 'start-policy.json'

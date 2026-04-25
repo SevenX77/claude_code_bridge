@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import time
 
 from agents.config_identity import project_config_identity_payload
 from agents.config_loader import load_project_config
 from ccbd.socket_client import CcbdClient, CcbdClientError
+from cli.master_claude_identity import find_master_claude_pid, is_pid_alive, read_owner_lockfile
 
 from .models import CcbdServiceError, DaemonHandle
 
@@ -37,6 +39,7 @@ def connect_compatible_daemon(
 ) -> DaemonHandle | None:
     if not inspection.socket_connectable:
         return None
+    _enforce_master_claude_owner(context)
     client = client_factory(context.paths.ccbd_socket_path)
     try:
         matches_config = daemon_matches_project_config_fn(context, client)
@@ -77,6 +80,27 @@ def shutdown_incompatible_daemon(
         time.sleep(0.05)
     raise CcbdServiceError(
         f'{incompatible_daemon_error}; old ccbd did not shut down in time'
+    )
+
+
+def _enforce_master_claude_owner(context) -> None:
+    path = context.paths.ccbd_owner_lockfile_path
+    owner = read_owner_lockfile(path)
+    if owner is None:
+        return
+    if not is_pid_alive(owner.pid):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        return
+    current_pid = find_master_claude_pid(os.getpid())
+    if current_pid is None or current_pid == owner.pid:
+        return
+    raise CcbdServiceError(
+        f'[CCB Fatal] Project {context.project.project_root} is currently locked by master Claude PID {owner.pid}.\n'
+        f'Your master Claude PID {current_pid} cannot share this ccbd (would corrupt agent conversation context).\n'
+        'Phase 1 mitigation: only one master Claude per project at a time. Open another project or kill the other Claude first.'
     )
 
 

@@ -56,6 +56,7 @@ def inspect_daemon(context: CliContext):
 
 
 def ensure_daemon_started(context: CliContext) -> DaemonHandle:
+    _cleanup_owner_lockfile_if_stale(context)
     try:
         return _ensure_daemon_started_runtime(
             context,
@@ -74,6 +75,7 @@ def ensure_daemon_started(context: CliContext) -> DaemonHandle:
 
 
 def connect_mounted_daemon(context: CliContext, *, allow_restart_stale: bool) -> DaemonHandle:
+    _cleanup_owner_lockfile_if_stale(context)
     return _connect_mounted_daemon_runtime(
         context,
         allow_restart_stale=allow_restart_stale,
@@ -258,6 +260,24 @@ def _augment_start_failure(context: CliContext, exc: CcbdServiceError) -> CcbdSe
     if not failure_reason or failure_reason in message:
         return exc
     return CcbdServiceError(f'{message}; keeper_last_failure: {failure_reason}')
+
+
+def _cleanup_owner_lockfile_if_stale(context: CliContext) -> None:
+    path = context.paths.ccbd_owner_lockfile_path
+    if not path.exists():
+        return
+    try:
+        _, _, inspection = inspect_daemon(context)
+    except Exception:
+        return
+    if inspection.socket_connectable:
+        return
+    if inspection.health not in {LeaseHealth.MISSING, LeaseHealth.UNMOUNTED, LeaseHealth.STALE} and inspection.pid_alive:
+        return
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _normalize_request_failure(context: CliContext) -> CcbdServiceError | None:

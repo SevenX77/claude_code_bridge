@@ -66,6 +66,13 @@ def _unlink_socket_if_forced(context, *, force: bool) -> None:
         pass
 
 
+def _unlink_owner_lockfile(context) -> None:
+    try:
+        context.paths.ccbd_owner_lockfile_path.unlink()
+    except FileNotFoundError:
+        pass
+
+
 def shutdown_daemon(
     context,
     *,
@@ -112,6 +119,7 @@ def shutdown_daemon(
         is_pid_alive_fn=is_pid_alive_fn,
     )
     _unlink_socket_if_forced(context, force=force)
+    _unlink_owner_lockfile(context)
     finalize_shutdown_lifecycle_fn(context)
 
     _, _, final_inspection = inspect_daemon_fn(context)

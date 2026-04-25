@@ -54,6 +54,8 @@ def initialize_app(app, project_root: str | Path, *, clock, pid: int | None) -> 
     app.config_identity = project_config_identity_payload(app.config)
     keeper_pid = str(os.environ.get('CCB_KEEPER_PID') or '').strip()
     app.keeper_pid = int(keeper_pid) if keeper_pid.isdigit() and int(keeper_pid) > 0 else None
+    master_pid = str(os.environ.get('CCB_MASTER_CLAUDE_PID') or '').strip()
+    app.master_claude_pid = int(master_pid) if master_pid.isdigit() and int(master_pid) > 0 else None
     app.daemon_instance_id = uuid.uuid4().hex
     app.provider_catalog = build_default_provider_catalog()
     app.mount_manager = MountManager(app.paths, clock=app.clock)

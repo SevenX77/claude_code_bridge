@@ -21,6 +21,7 @@ from ccbd.system import utc_now
 from runtime_env.control_plane import control_plane_env
 
 from cli.kill_runtime.processes import is_pid_alive
+from cli.master_claude_identity import find_master_claude_pid
 
 
 def ensure_keeper_started(
@@ -181,6 +182,9 @@ def spawn_keeper_process(context) -> None:
     lib_root = _lib_root()
     script = lib_root / 'ccbd' / 'keeper_main.py'
     env = control_plane_env(extra={'PYTHONUNBUFFERED': '1'})
+    owner_pid = find_master_claude_pid(os.getpid())
+    if owner_pid is not None and owner_pid > 0:
+        env['CCB_MASTER_CLAUDE_PID'] = str(owner_pid)
     current_pythonpath = env.get('PYTHONPATH')
     env['PYTHONPATH'] = (
         str(lib_root)
