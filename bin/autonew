@@ -33,7 +33,7 @@ PROVIDER_COMMANDS = {
     "codex": "/new",
     "opencode": "/new",
     "droid": "/new",
-    "claude": "/new",
+    "claude": "/clear",
 }
 
 
@@ -66,6 +66,7 @@ def main(argv: list[str]) -> int:
     record = find_agent_runtime_by_provider(work_dir, provider)
     if not record:
         print(f"[ERROR] No active {provider} agent runtime found for this project.", file=sys.stderr)
+        print(f"[HINT] Confirm the agent is registered under <project>/.ccb/agents/ (run `ccb ps` to list bound agents).", file=sys.stderr)
         return EXIT_ERROR
 
     pane_id = str(record.get("pane_id") or "").strip()
