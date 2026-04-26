@@ -40,7 +40,11 @@ def parse_start(tokens: list[str], *, project: str | None, error_type) -> Parsed
     return ParsedStartCommand(
         project=project,
         agent_names=(),
-        restore=not bool(namespace.reset_context),
+        # phase1-F: user-initiated start always FRESH. The `-n/--new-context`
+        # flag still triggers the heavier project-state reset downstream, but
+        # the conversation-restore behavior is uniformly off here. Crash
+        # auto-recovery on the ccbd side uses CcbdStartPolicy.recovery_restore.
+        restore=False,
         auto_permission=not bool(namespace.safe),
         reset_context=bool(namespace.reset_context),
     )

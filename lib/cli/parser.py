@@ -61,7 +61,13 @@ class CliParser:
         tokens = list(argv)
         project, tokens = parse_global_options(tokens, error_type=CliUsageError)
         if not tokens:
-            return ParsedStartCommand(project=project, agent_names=(), restore=True, auto_permission=True)
+            # phase1-F: bare `ccb` starts agents FRESH (no --continue / --resume).
+            # Carrying over previous-session conversation across user-initiated
+            # restarts caused ongoing-task pollution (e.g. an unrelated TD work
+            # bled into the next user prompt). ccbd's own crash auto-recovery
+            # uses CcbdStartPolicy.recovery_restore (hardcoded True) on a
+            # separate code path, so this flip does not break recovery.
+            return ParsedStartCommand(project=project, agent_names=(), restore=False, auto_permission=True)
         command = tokens[0]
         if command not in SUBCOMMANDS:
             return parse_start(tokens, project=project, error_type=CliUsageError)
