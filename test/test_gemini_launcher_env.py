@@ -35,6 +35,52 @@ def test_build_gemini_env_prefix_clears_non_inherited_api_and_exports_filtered_k
     assert "export GEMINI_API_KEY=profile-key GOOGLE_API_KEY=extra-key" in prefix
 
 
+def test_build_gemini_env_prefix_force_clears_api_when_oauth_present(tmp_path: Path) -> None:
+    # User has master OAuth login (oauth_creds.json present), but their shell
+    # exports a stale GEMINI_API_KEY. CCB must NOT inherit it: agent should
+    # fall back to OAuth, not try the dead API key.
+    gemini_home = tmp_path / "gemini-home"
+    gemini_home.mkdir()
+    (gemini_home / "oauth_creds.json").write_text('{"refresh_token":"x"}\n', encoding="utf-8")
+
+    profile = ResolvedProviderProfile(
+        provider="gemini",
+        agent_name="agent1",
+        env={},
+        inherit_api=True,  # default; would normally pass through env
+    )
+
+    prefix = build_gemini_env_prefix(
+        profile=profile,
+        extra_env={},
+        gemini_home=gemini_home,
+    )
+
+    # OAuth detected → API envs forcibly unset regardless of inherit_api
+    assert "unset GEMINI_API_KEY" in prefix
+    assert "unset GOOGLE_API_KEY" in prefix
+    assert "unset GOOGLE_API_BASE" in prefix
+
+
+def test_build_gemini_env_prefix_inherits_api_when_no_oauth(tmp_path: Path) -> None:
+    # No OAuth → preserve current inherit_api behavior (default True passes envs through)
+    gemini_home = tmp_path / "gemini-home"
+    gemini_home.mkdir()
+    # Note: no oauth_creds.json
+
+    profile = ResolvedProviderProfile(
+        provider="gemini",
+        agent_name="agent1",
+        env={},
+        inherit_api=True,
+    )
+
+    prefix = build_gemini_env_prefix(profile=profile, extra_env={}, gemini_home=gemini_home)
+
+    # No unset clauses since OAuth absent and inherit_api=True
+    assert "unset" not in prefix
+
+
 def _spec(name: str = 'agent1') -> AgentSpec:
     return AgentSpec(
         name=name,

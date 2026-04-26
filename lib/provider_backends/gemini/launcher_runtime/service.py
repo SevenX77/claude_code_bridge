@@ -54,8 +54,12 @@ def build_start_cmd(
         cmd_parts.extend(["--resume", "latest"])
     cmd_parts.extend(spec.startup_args)
     cmd = " ".join(shlex.quote(str(part)) for part in cmd_parts)
+    gemini_home_path = None
+    home_root_str = home_overrides.get("HOME") if home_overrides else None
+    if home_root_str:
+        gemini_home_path = Path(home_root_str) / ".gemini"
     env_prefix = join_env_prefix(
-        build_gemini_env_prefix(profile=profile, extra_env=spec.env),
+        build_gemini_env_prefix(profile=profile, extra_env=spec.env, gemini_home=gemini_home_path),
         export_env_clause(home_overrides),
         export_env_clause(caller_context_env(actor=spec.name, runtime_dir=runtime_dir, launch_session_id=launch_session_id)),
     )
