@@ -72,6 +72,7 @@ class TmuxTextSender:
         slash_command = _slash_command_text(sanitized)
         if slash_command:
             self.tmux_run_fn(['send-keys', '-t', pane_id, '-l', slash_command], check=True)
+            time.sleep(0.25)
             self.tmux_run_fn(['send-keys', '-t', pane_id, 'Enter'], check=True)
             return
 

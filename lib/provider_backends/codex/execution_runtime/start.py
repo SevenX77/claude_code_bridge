@@ -72,6 +72,8 @@ def start_active_submission(
             'last_assistant_signature': '',
             'session_path': state_session_path(state),
             'no_wrap': no_wrap,
+            'prompt_sent': True,
+            'prompt_sent_at': now,
         },
     )
 

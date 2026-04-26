@@ -6,6 +6,7 @@ from completion.models import CompletionConfidence, CompletionDecision, Completi
 from ccbd.system import parse_utc_timestamp
 from provider_execution.active import ensure_active_pane_alive, prepare_active_poll_without_liveness
 from provider_execution.base import ProviderPollResult, ProviderSubmission
+from provider_execution.no_wrap_terminal import complete_no_wrap_after_prompt_sent
 
 from .event_reading import is_turn_boundary_event, read_events, terminal_api_error_payload
 from .hook_results import poll_exact_hook
@@ -45,6 +46,9 @@ def poll_submission(
     hook_result = poll_exact_hook(submission, now=now)
     if hook_result is not None:
         return hook_result
+    no_wrap_terminal = complete_no_wrap_after_prompt_sent(submission, now=now)
+    if no_wrap_terminal is not None:
+        return no_wrap_terminal
     pane_dead_result = _ensure_prepared_pane_alive(submission, prepared=prepared, now=now)
     if pane_dead_result is not None:
         return pane_dead_result

@@ -4,9 +4,9 @@ from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
-from cli.models import ParsedAskWaitCommand
+from cli.models import ParsedAskCommand, ParsedAskWaitCommand
 from cli.phase2 import maybe_handle_phase2
-from cli.phase2_runtime.handlers_ask import handle_ask_wait
+from cli.phase2_runtime.handlers_ask import handle_ask, handle_ask_wait
 from cli.services.ask import AskSummary
 
 
@@ -48,14 +48,15 @@ def test_phase2_ask_wait_submit_writes_output(monkeypatch, tmp_path: Path) -> No
     assert output_path.read_text(encoding='utf-8') == 'done\n'
 
 
-def test_handle_ask_wait_slash_job_id_completes_without_watch() -> None:
+def test_handle_ask_wait_slash_job_id_still_enters_watch() -> None:
     calls: list[str] = []
     command = ParsedAskWaitCommand(project=None, job_id='/clear')
 
     def watch_ask_job(context, job_id, out, timeout, emit_output, command=None):
-        del context, job_id, out, timeout, emit_output, command
+        del context, out, timeout, emit_output, command
         calls.append('watch')
-        raise AssertionError('slash job id must not watch')
+        assert job_id == '/clear'
+        return SimpleNamespace(status='completed', reply='')
 
     services = SimpleNamespace(
         watch_ask_job=watch_ask_job,
@@ -66,7 +67,7 @@ def test_handle_ask_wait_slash_job_id_completes_without_watch() -> None:
     code = handle_ask_wait(SimpleNamespace(), command, StringIO(), services)
 
     assert code == 0
-    assert calls == []
+    assert calls == ['watch']
 
 
 def test_handle_ask_wait_passes_command_to_watch() -> None:
@@ -96,3 +97,31 @@ def test_handle_ask_wait_passes_command_to_watch() -> None:
         'emit_output': True,
         'command': command,
     }
+
+
+def test_handle_ask_slash_command_submits_instead_of_short_circuiting() -> None:
+    calls: list[str] = []
+    command = ParsedAskCommand(project=None, target='agent1', sender=None, message='/clear')
+
+    def submit_ask(context, command):
+        del context
+        calls.append('submit')
+        assert command.message == '/clear'
+        return AskSummary(
+            project_id='proj-1',
+            submission_id='sub-1',
+            jobs=({'job_id': 'job_1', 'target_name': 'agent1', 'status': 'accepted'},),
+        )
+
+    services = SimpleNamespace(
+        submit_ask=submit_ask,
+        render_ask=lambda summary: (f"submitted:{summary.jobs[0]['job_id']}",),
+        write_lines=lambda out, lines: out.write('\n'.join(lines)),
+    )
+    out = StringIO()
+
+    code = handle_ask(SimpleNamespace(), command, out, services)
+
+    assert code == 0
+    assert calls == ['submit']
+    assert out.getvalue() == 'submitted:job_1'

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from provider_execution.active import prepare_active_poll
 from provider_execution.base import ProviderPollResult, ProviderSubmission
+from provider_execution.no_wrap_terminal import complete_no_wrap_after_prompt_sent
 
 from .event_reading import read_entries
 from .start import state_session_path
@@ -24,6 +25,10 @@ def poll_submission(submission: ProviderSubmission, *, now: str) -> ProviderPoll
     state = submission.runtime_state.get("state") or {}
     poll = build_poll_state(submission)
     state = poll_entry_batches(submission, poll, prepared.reader, state, now=now)
+    if not poll.reached_terminal:
+        no_wrap_terminal = complete_no_wrap_after_prompt_sent(submission, now=now)
+        if no_wrap_terminal is not None:
+            return no_wrap_terminal
     return finalize_poll_result(submission, poll, state=state)
 
 

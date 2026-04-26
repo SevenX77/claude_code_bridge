@@ -266,7 +266,7 @@ def test_watch_ask_job_reconnects_and_preserves_cursor(monkeypatch: pytest.Monke
     assert rendered == [('job_1:2:False',), ('job_1:4:True',)]
 
 
-def test_watch_ask_job_slash_command_completes_without_connecting(
+def test_watch_ask_job_slash_command_polls_daemon_like_regular_wait(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -274,12 +274,28 @@ def test_watch_ask_job_slash_command_completes_without_connecting(
     project_root.mkdir()
     context = _build_context(project_root)
     command = ParsedAskCommand(project=None, target='agent1', sender=None, message='/clear', wait=True)
+    calls: list[str] = []
 
-    def connect_mounted_daemon(context, allow_restart_stale):
-        del context, allow_restart_stale
-        raise AssertionError('slash command must not connect to daemon watch')
+    class _FakeClient:
+        def watch(self, job_id: str, *, cursor: int = 0) -> dict:
+            calls.append(f'{job_id}:{cursor}')
+            return {
+                'job_id': job_id,
+                'agent_name': 'agent1',
+                'cursor': 1,
+                'generation': 1,
+                'terminal': True,
+                'status': 'completed',
+                'reply': '',
+                'events': [],
+            }
 
-    monkeypatch.setattr(ask_service, 'connect_mounted_daemon', connect_mounted_daemon)
+    monkeypatch.setattr(
+        ask_service,
+        'connect_mounted_daemon',
+        lambda context, allow_restart_stale: SimpleNamespace(client=_FakeClient()),
+    )
+    monkeypatch.setattr(ask_service, 'render_watch_batch', lambda batch: ())
 
     batch = ask_service.watch_ask_job(
         context,
@@ -295,6 +311,7 @@ def test_watch_ask_job_slash_command_completes_without_connecting(
     assert batch.status == 'completed'
     assert batch.reply == ''
     assert batch.events == ()
+    assert calls == ['job_1:0']
 
 
 def test_watch_ask_job_times_out_after_reconnect_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

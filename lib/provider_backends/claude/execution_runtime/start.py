@@ -10,6 +10,7 @@ from provider_core.instance_resolution import named_agent_instance
 from provider_execution.active import PreparedActiveStart, prepare_active_start, resume_active_submission
 from provider_execution.base import ProviderRuntimeContext, ProviderSubmission
 from provider_execution.common import no_wrap_requested, preferred_session_path, send_prompt_to_runtime_target
+from terminal_runtime.tmux_send import _is_slash_command
 
 from ..protocol import wrap_claude_prompt, wrap_claude_turn_prompt
 from provider_hooks.artifacts import completion_dir_from_session_data
@@ -131,7 +132,7 @@ def start_active_submission(
     state = reader.capture_state()
     request_anchor = request_anchor_fn(job.job_id)
     completion_dir = completion_dir_for_session(prepared.session)
-    no_wrap = no_wrap_requested(job)
+    no_wrap = no_wrap_requested(job) or _is_slash_command(job.request.body)
     reply_delivery = str(job.request.message_type or "").strip().lower() == "reply_delivery"
     prompt = (
         job.request.body

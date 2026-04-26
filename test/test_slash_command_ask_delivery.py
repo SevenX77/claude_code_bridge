@@ -9,6 +9,13 @@ from ccbd.api_models import DeliveryScope, JobRecord, JobStatus, MessageEnvelope
 from cli.models import ParsedAskCommand
 from cli.phase2_runtime.handlers_ask import handle_ask
 from cli.services.ask_runtime.models import AskSummary
+from completion.models import CompletionSourceKind, CompletionStatus
+from provider_backends.claude.execution_runtime.polling import (
+    poll_submission as poll_claude_submission,
+)
+from provider_backends.codex.execution_runtime.polling import (
+    poll_submission as poll_codex_submission,
+)
 from provider_backends.codex.execution_runtime.start import start_active_submission as start_codex_submission
 from provider_backends.gemini.execution_runtime.polling_runtime.reader import (
     poll_submission as poll_gemini_submission,
@@ -16,7 +23,7 @@ from provider_backends.gemini.execution_runtime.polling_runtime.reader import (
 from provider_backends.gemini.execution_runtime.start_runtime.service import (
     start_active_submission as start_gemini_submission,
 )
-from provider_execution.base import ProviderRuntimeContext
+from provider_execution.base import ProviderRuntimeContext, ProviderSubmission
 from terminal_runtime.tmux_send import TmuxTextSender
 
 
@@ -113,7 +120,7 @@ def test_gemini_start_treats_slash_command_as_no_wrap_before_prompt_wrapping(tmp
     assert 'CCB_REQ_ID:' not in submission.runtime_state['prompt_text']
     assert '#req_id' not in submission.runtime_state['prompt_text']
 
-    poll_gemini_submission(
+    poll_result = poll_gemini_submission(
         submission,
         now='2026-04-26T00:00:01Z',
         extract_reply_for_req_fn=lambda reply, req_id: None,
@@ -126,9 +133,14 @@ def test_gemini_start_treats_slash_command_as_no_wrap_before_prompt_wrapping(tmp
         ['send-keys', '-t', '%3', 'Enter'],
     ]
     assert not any(call and call[0] == 'paste-buffer' for call in calls)
+    assert poll_result is not None
+    assert poll_result.decision is not None
+    assert poll_result.decision.status is CompletionStatus.COMPLETED
+    assert poll_result.decision.reason == 'no_wrap_prompt_sent'
+    assert poll_result.submission.runtime_state['no_wrap_terminal_emitted'] is True
 
 
-def test_ask_wait_slash_command_completes_without_watch_polling(tmp_path: Path) -> None:
+def test_ask_wait_slash_command_submits_and_watches(tmp_path: Path) -> None:
     calls: list[str] = []
     output_path = tmp_path / 'slash.out'
     command = ParsedAskCommand(
@@ -143,12 +155,17 @@ def test_ask_wait_slash_command_completes_without_watch_polling(tmp_path: Path) 
     def submit_ask(context, command):
         del context, command
         calls.append('submit')
-        raise AssertionError('slash command must not submit')
+        return AskSummary(
+            project_id='proj_1',
+            submission_id='sub_1',
+            jobs=({'job_id': 'job_1', 'agent_name': 'agent1', 'status': 'accepted'},),
+        )
 
     def watch_ask_job(context, job_id, out, timeout, emit_output, command=None):
-        del context, job_id, out, timeout, emit_output, command
+        del context, out, timeout, emit_output, command
         calls.append('watch')
-        raise AssertionError('slash command must not watch')
+        assert job_id == 'job_1'
+        return SimpleNamespace(status='completed', reply='')
 
     services = SimpleNamespace(
         submit_ask=submit_ask,
@@ -161,7 +178,7 @@ def test_ask_wait_slash_command_completes_without_watch_polling(tmp_path: Path) 
     code = handle_ask(SimpleNamespace(), command, StringIO(), services)
 
     assert code == 0
-    assert calls == []
+    assert calls == ['submit', 'watch']
     assert output_path.read_text(encoding='utf-8') == ''
 
 
@@ -259,3 +276,65 @@ def test_codex_slash_command_reaches_tmux_sender_as_raw_keystrokes(tmp_path: Pat
         ['send-keys', '-t', '%1', 'Enter'],
     ]
     assert not any(call and call[0] == 'paste-buffer' for call in calls)
+
+
+def _no_wrap_submission(provider: str) -> ProviderSubmission:
+    class FakeBackend:
+        def is_alive(self, pane_id: str) -> bool:
+            return True
+
+    class FakeReader:
+        def try_get_entries(self, state):
+            return [], state
+
+        def try_get_message(self, state):
+            return None, state
+
+    return ProviderSubmission(
+        job_id='job_1',
+        agent_name='agent1',
+        provider=provider,
+        accepted_at='2026-04-26T00:00:00Z',
+        ready_at='2026-04-26T00:00:00Z',
+        source_kind={
+            'claude': CompletionSourceKind.SESSION_EVENT_LOG,
+            'codex': CompletionSourceKind.PROTOCOL_EVENT_STREAM,
+            'gemini': CompletionSourceKind.SESSION_SNAPSHOT,
+        }[provider],
+        reply='',
+        runtime_state={
+            'mode': 'active',
+            'reader': FakeReader(),
+            'backend': FakeBackend(),
+            'pane_id': '%1',
+            'state': {},
+            'request_anchor': 'req_1',
+            'next_seq': 1,
+            'anchor_seen': True,
+            'anchor_emitted': True,
+            'no_wrap': True,
+            'prompt_sent': True,
+        },
+    )
+
+
+def test_codex_no_wrap_prompt_sent_returns_terminal_completed() -> None:
+    result = poll_codex_submission(_no_wrap_submission('codex'), now='2026-04-26T00:00:01Z')
+
+    assert result is not None
+    assert result.decision is not None
+    assert result.decision.status is CompletionStatus.COMPLETED
+    assert result.decision.reason == 'no_wrap_prompt_sent'
+    assert result.items[0].payload['completion_source'] == 'no_wrap_dispatch'
+    assert result.submission.runtime_state['no_wrap_terminal_emitted'] is True
+
+
+def test_claude_no_wrap_prompt_sent_returns_terminal_completed() -> None:
+    result = poll_claude_submission(None, _no_wrap_submission('claude'), now='2026-04-26T00:00:01Z')
+
+    assert result is not None
+    assert result.decision is not None
+    assert result.decision.status is CompletionStatus.COMPLETED
+    assert result.decision.reason == 'no_wrap_prompt_sent'
+    assert result.items[0].payload['completion_source'] == 'no_wrap_dispatch'
+    assert result.submission.runtime_state['no_wrap_terminal_emitted'] is True

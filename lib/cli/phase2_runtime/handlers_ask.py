@@ -1,14 +1,7 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 
 def handle_ask(context, command, out, services) -> int:
-    if services.is_slash_ask_command(command):
-        if command.output_path is not None:
-            services.write_ask_output(command.output_path, '')
-        return services.exit_code_for_ask_status('completed', reply='')
-
     summary = services.submit_ask(context, command)
     if not command.wait:
         services.write_lines(out, services.render_ask(summary))
@@ -38,9 +31,6 @@ def handle_ask(context, command, out, services) -> int:
 
 
 def handle_ask_wait(context, command, out, services) -> int:
-    if services.is_slash_ask_command(SimpleNamespace(message=command.job_id)):
-        return services.exit_code_for_ask_status('completed', reply='')
-
     terminal = services.watch_ask_job(
         context,
         command.job_id,
