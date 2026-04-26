@@ -2,10 +2,26 @@ from __future__ import annotations
 
 import os
 import random
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+
+_SLASH_COMMAND_RE = re.compile(r'^/(?:clear|new|help|auth)(?:\s+.*)?$')
+
+
+def _is_slash_command(text: str) -> bool:
+    return _slash_command_text(text) is not None
+
+
+def _slash_command_text(text: str) -> str | None:
+    candidate = text.strip()
+    if not candidate or '\n' in candidate or '\r' in candidate:
+        return None
+    if _SLASH_COMMAND_RE.fullmatch(candidate):
+        return candidate
+    return None
 
 
 class CcbDeliveryError(RuntimeError):
@@ -53,6 +69,12 @@ class TmuxTextSender:
             return
 
         self.ensure_not_in_copy_mode_fn(pane_id)
+        slash_command = _slash_command_text(sanitized)
+        if slash_command:
+            self.tmux_run_fn(['send-keys', '-t', pane_id, '-l', slash_command], check=True)
+            self.tmux_run_fn(['send-keys', '-t', pane_id, 'Enter'], check=True)
+            return
+
         self._paste_via_buffer(
             target=pane_id,
             text=sanitized,
@@ -60,6 +82,12 @@ class TmuxTextSender:
             req_id=req_id,
             reception_dir=reception_dir,
         )
+
+    def _is_slash_command(self, text: str) -> bool:
+        return _is_slash_command(text)
+
+    def _slash_command_text(self, text: str) -> str | None:
+        return _slash_command_text(text)
 
     def _paste_via_buffer(
         self,

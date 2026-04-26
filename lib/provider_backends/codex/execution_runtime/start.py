@@ -10,6 +10,7 @@ from provider_core.instance_resolution import named_agent_instance
 from provider_execution.active import PreparedActiveStart, prepare_active_start
 from provider_execution.base import ProviderRuntimeContext, ProviderSubmission
 from provider_execution.common import no_wrap_requested, normalize_session_path, send_prompt_to_runtime_target
+from terminal_runtime.tmux_send import _is_slash_command
 
 
 def start_active_submission(
@@ -40,7 +41,7 @@ def start_active_submission(
     reader = reader_factory(prepared.session, None)
     state = reader.capture_state()
     request_anchor = request_anchor_fn(job.job_id)
-    no_wrap = no_wrap_requested(job)
+    no_wrap = no_wrap_requested(job) or _is_slash_command(job.request.body)
     prompt = job.request.body if no_wrap else wrap_prompt_fn(job.request.body, request_anchor)
     send_prompt_to_runtime_target(prepared.backend, prepared.pane_id, prompt)
 

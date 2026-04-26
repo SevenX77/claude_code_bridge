@@ -33,6 +33,58 @@ def _cp(*, stdout: str = '', returncode: int = 0) -> subprocess.CompletedProcess
     return subprocess.CompletedProcess(args=['tmux'], returncode=returncode, stdout=stdout, stderr='')
 
 
+def _build_slash_sender(tmux_run_fn):
+    return TmuxTextSender(
+        tmux_run_fn=tmux_run_fn,
+        looks_like_tmux_target_fn=lambda _: True,
+        ensure_not_in_copy_mode_fn=lambda _: None,
+        build_buffer_name_fn=lambda **_: 'buf-slash',
+        sanitize_text_fn=lambda t: t,
+        should_use_inline_legacy_send_fn=lambda **_: False,
+        env_float_fn=lambda name, default: 0.0,
+        sleep_fn=lambda _: None,
+    )
+
+
+@pytest.mark.parametrize(
+    ('text', 'expected'),
+    [
+        ('/clear\n', True),
+        ('/clear', True),
+        ('/etc/passwd is a file', False),
+        ('/new arg1 arg2', True),
+        ('/unknown_cmd', False),
+    ],
+)
+def test_slash_command_detection_whitelist_and_trailing_newline(text: str, expected: bool) -> None:
+    sender = _build_slash_sender(lambda args, **kwargs: _cp())
+
+    assert sender._is_slash_command(text) is expected
+
+
+def test_slash_command_send_uses_literal_send_keys_not_paste_buffer() -> None:
+    calls: list[list[str]] = []
+    sender = _build_slash_sender(lambda args, **kwargs: calls.append(list(args)) or _cp())
+
+    sender.send_text('%5', '/clear\n')
+
+    assert calls == [
+        ['send-keys', '-t', '%5', '-l', '/clear'],
+        ['send-keys', '-t', '%5', 'Enter'],
+    ]
+    assert not any(c and c[0] == 'paste-buffer' for c in calls)
+
+
+def test_regular_prompt_still_uses_paste_buffer() -> None:
+    calls: list[list[str]] = []
+    sender = _build_slash_sender(lambda args, **kwargs: calls.append(list(args)) or _cp())
+
+    sender.send_text('%5', '一段普通的 prompt 内容\n')
+
+    assert ['paste-buffer', '-p', '-t', '%5', '-b', 'buf-slash'] in calls
+    assert not any(c == ['send-keys', '-t', '%5', '-l', '一段普通的 prompt 内容'] for c in calls)
+
+
 def test_tmux_text_sender_deletes_buffer_after_paste_failure() -> None:
     calls: list[list[str]] = []
     sender = TmuxTextSender(

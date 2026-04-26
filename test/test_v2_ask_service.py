@@ -266,6 +266,37 @@ def test_watch_ask_job_reconnects_and_preserves_cursor(monkeypatch: pytest.Monke
     assert rendered == [('job_1:2:False',), ('job_1:4:True',)]
 
 
+def test_watch_ask_job_slash_command_completes_without_connecting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / 'repo-ask-watch-slash'
+    project_root.mkdir()
+    context = _build_context(project_root)
+    command = ParsedAskCommand(project=None, target='agent1', sender=None, message='/clear', wait=True)
+
+    def connect_mounted_daemon(context, allow_restart_stale):
+        del context, allow_restart_stale
+        raise AssertionError('slash command must not connect to daemon watch')
+
+    monkeypatch.setattr(ask_service, 'connect_mounted_daemon', connect_mounted_daemon)
+
+    batch = ask_service.watch_ask_job(
+        context,
+        'job_1',
+        StringIO(),
+        timeout=30.0,
+        emit_output=True,
+        command=command,
+    )
+
+    assert batch.job_id == 'job_1'
+    assert batch.terminal is True
+    assert batch.status == 'completed'
+    assert batch.reply == ''
+    assert batch.events == ()
+
+
 def test_watch_ask_job_times_out_after_reconnect_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     project_root = tmp_path / 'repo-ask-timeout'
     project_root.mkdir()

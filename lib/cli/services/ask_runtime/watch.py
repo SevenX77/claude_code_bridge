@@ -13,6 +13,8 @@ def watch_ask_job(
     *,
     timeout: float | None,
     emit_output: bool,
+    command=None,
+    is_slash_ask_command_fn: Callable[[object], bool] | None = None,
     connect_mounted_daemon_fn: Callable,
     reconnect_error_classes: tuple[type[BaseException], ...],
     monotonic_fn: Callable[[], float],
@@ -22,6 +24,23 @@ def watch_ask_job(
     render_watch_batch_fn: Callable[[WatchEventBatch], tuple[str, ...]],
     write_lines_fn: Callable[[TextIO, tuple[str, ...]], None],
 ) -> WatchEventBatch:
+    if command is not None and is_slash_ask_command_fn is not None and is_slash_ask_command_fn(command):
+        return WatchEventBatch(
+            target=job_id,
+            job_id=job_id,
+            agent_name='',
+            target_kind=None,
+            target_name='',
+            provider=None,
+            provider_instance=None,
+            cursor=0,
+            generation=None,
+            terminal=True,
+            status='completed',
+            reply='',
+            events=(),
+        )
+
     handle = connect_mounted_daemon_fn(context, allow_restart_stale=True)
     assert handle.client is not None
     client = handle.client

@@ -5,6 +5,7 @@ from completion.models import CompletionSourceKind
 from provider_execution.active import PreparedActiveStart, prepare_active_start, resume_active_submission
 from provider_execution.base import ProviderSubmission
 from provider_execution.common import no_wrap_requested, preferred_session_path
+from terminal_runtime.tmux_send import _is_slash_command
 
 from .prompt import build_exact_prompt
 from .readiness import resolved_timeout
@@ -46,7 +47,7 @@ def start_active_submission(
     state = reader.capture_state()
     request_anchor = request_anchor_fn(job.job_id)
     completion_dir = completion_dir_for_session(prepared.session)
-    no_wrap = no_wrap_requested(job)
+    no_wrap = no_wrap_requested(job) or _is_slash_command(job.request.body)
     prompt = (
         job.request.body
         if no_wrap
