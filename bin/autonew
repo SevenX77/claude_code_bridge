@@ -22,9 +22,8 @@ script_dir = Path(__file__).resolve().parent
 lib_dir = script_dir.parent / "lib"
 sys.path.insert(0, str(lib_dir))
 
+from agents.runtime_lookup import find_agent_runtime_by_provider
 from cli.output import EXIT_ERROR, EXIT_OK
-from pane_registry_runtime import get_providers_map, load_registry_by_project_id
-from project.identity import compute_ccb_project_id
 from terminal_runtime import get_backend_for_session
 
 
@@ -63,25 +62,13 @@ def main(argv: list[str]) -> int:
         print(f"[ERROR] Available: {', '.join(sorted(PROVIDER_COMMANDS.keys()))}", file=sys.stderr)
         return EXIT_ERROR
 
-    # Get current project ID
     work_dir = Path(os.getcwd())
-    try:
-        project_id = compute_ccb_project_id(work_dir)
-    except Exception as e:
-        print(f"[ERROR] Failed to compute project ID: {e}", file=sys.stderr)
-        return EXIT_ERROR
-
-    # Load registry for this project and provider
-    record = load_registry_by_project_id(project_id, provider)
+    record = find_agent_runtime_by_provider(work_dir, provider)
     if not record:
-        print(f"[ERROR] No active {provider} session found for this project.", file=sys.stderr)
+        print(f"[ERROR] No active {provider} agent runtime found for this project.", file=sys.stderr)
         return EXIT_ERROR
 
-    # Get provider's pane_id
-    providers_map = get_providers_map(record)
-    provider_entry = providers_map.get(provider, {})
-    pane_id = str(provider_entry.get("pane_id") or "").strip()
-
+    pane_id = str(record.get("pane_id") or "").strip()
     if not pane_id:
         print(f"[ERROR] No pane_id found for {provider}.", file=sys.stderr)
         return EXIT_ERROR
