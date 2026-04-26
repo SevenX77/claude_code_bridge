@@ -7,7 +7,7 @@ from ccbd.system import parse_utc_timestamp
 from provider_execution.active import ensure_active_pane_alive, prepare_active_poll_without_liveness
 from provider_execution.base import ProviderPollResult, ProviderSubmission
 from provider_execution.no_wrap_terminal import complete_no_wrap_after_prompt_sent
-from provider_execution.pane_stability_terminal import complete_after_pane_idle
+from provider_execution.pane_stability_terminal import observe_pane_stability, terminal_if_stable
 
 from .event_reading import is_turn_boundary_event, read_events, terminal_api_error_payload
 from .hook_results import poll_exact_hook
@@ -59,13 +59,14 @@ def poll_submission(
     if isinstance(state, ProviderPollResult):
         return state
     updated = _replace_state_for_fallback(submission, poll, state)
-    pane_stable_terminal = complete_after_pane_idle(
+    updated = observe_pane_stability(
         updated,
         now=now,
         get_pane_content_fn=getattr(prepared.backend, "get_pane_content", None),
         pane_id=prepared.pane_id,
         log_path_str=str(updated.runtime_state.get("session_path") or ""),
     )
+    pane_stable_terminal = terminal_if_stable(updated, now=now)
     if pane_stable_terminal is not None:
         return pane_stable_terminal
     return finalize_poll_result(submission, poll, state=state)

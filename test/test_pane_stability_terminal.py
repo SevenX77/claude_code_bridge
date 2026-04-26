@@ -3,11 +3,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from completion.models import CompletionItemKind
 from completion.models import CompletionSourceKind, CompletionStatus
+from provider_backends.codex.execution_runtime.polling import poll_submission as poll_codex_submission
 from provider_execution.base import ProviderSubmission
 from provider_execution.pane_stability_terminal import (
     PANE_STABLE_TERMINAL_FLAG,
     complete_after_pane_idle,
+    observe_pane_stability,
+    terminal_if_stable,
 )
 
 
@@ -40,7 +44,19 @@ def _submission(runtime_state: dict[str, object] | None = None) -> ProviderSubmi
 
 
 def _poll(submission: ProviderSubmission, pane: Pane, *, now: str, log_path: Path | None):
-    return complete_after_pane_idle(
+    observed = _observe(submission, pane, now=now, log_path=log_path)
+    terminal = terminal_if_stable(observed, now=now)
+    if terminal is not None:
+        return terminal
+    if observed != submission:
+        from provider_execution.base import ProviderPollResult
+
+        return ProviderPollResult(submission=observed)
+    return None
+
+
+def _observe(submission: ProviderSubmission, pane: Pane, *, now: str, log_path: Path | None):
+    return observe_pane_stability(
         submission,
         now=now,
         get_pane_content_fn=pane.get,
@@ -123,7 +139,7 @@ def test_get_pane_content_exception_returns_none() -> None:
     def broken(pane_id: str, *, lines: int) -> str:
         raise RuntimeError("boom")
 
-    result = complete_after_pane_idle(
+    observed = observe_pane_stability(
         _submission(),
         now="2026-04-26T00:00:25Z",
         get_pane_content_fn=broken,
@@ -131,6 +147,7 @@ def test_get_pane_content_exception_returns_none() -> None:
         log_path_str=None,
     )
 
+    result = terminal_if_stable(observed, now="2026-04-26T00:00:25Z")
     assert result is None
 
 
@@ -147,6 +164,15 @@ def test_missing_log_uses_pane_only_threshold() -> None:
     assert result.decision.status is CompletionStatus.COMPLETED
 
 
+def test_missing_log_with_require_log_mtime_does_not_use_pane_only_threshold() -> None:
+    pane = Pane()
+    first = _observe(_submission(), pane, now="2026-04-26T00:00:00Z", log_path=None)
+
+    result = terminal_if_stable(first, now="2026-04-26T00:00:30Z", require_log_mtime=True)
+
+    assert result is None
+
+
 def test_log_mtime_change_resets_log_idle_tracking(tmp_path: Path) -> None:
     log_path = tmp_path / "session.jsonl"
     log_path.write_text("one\n", encoding="utf-8")
@@ -161,3 +187,63 @@ def test_log_mtime_change_resets_log_idle_tracking(tmp_path: Path) -> None:
     assert result is not None
     assert result.decision is None
     assert result.submission.runtime_state["log_mtime_seen_at"] == "2026-04-26T00:00:25Z"
+
+
+def test_codex_observe_does_not_drop_items_when_pane_hash_first_changes(tmp_path: Path) -> None:
+    log_path = tmp_path / "session.jsonl"
+    log_path.write_text("one\n", encoding="utf-8")
+
+    class Backend:
+        def is_alive(self, pane_id: str) -> bool:
+            return pane_id == "%1"
+
+        def get_pane_content(self, pane_id: str, *, lines: int) -> str:
+            assert pane_id == "%1"
+            assert lines == 200
+            return "assistant finished"
+
+    class Reader:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def try_get_entries(self, state):
+            self.calls += 1
+            if self.calls == 1:
+                return [
+                    {
+                        "role": "assistant",
+                        "text": "hello from codex",
+                        "timestamp": "2026-04-26T00:00:01Z",
+                        "phase": "final_answer",
+                    }
+                ], {"log_path": str(log_path)}
+            return [], {"log_path": str(log_path)}
+
+    submission = _submission(
+        {
+            "reader": Reader(),
+            "backend": Backend(),
+            "pane_id": "%1",
+            "state": {"log_path": str(log_path)},
+            "anchor_seen": True,
+            "bound_turn_id": "",
+            "bound_task_id": "",
+            "reply_buffer": "",
+            "last_agent_message": "",
+            "last_final_answer": "",
+            "last_assistant_message": "",
+            "last_assistant_signature": "",
+            "session_path": str(log_path),
+            "no_wrap": False,
+            "prompt_sent": True,
+        }
+    )
+
+    result = poll_codex_submission(submission, now="2026-04-26T00:00:05Z")
+
+    assert result is not None
+    assert result.decision is None
+    assert [item.kind for item in result.items] == [CompletionItemKind.ASSISTANT_CHUNK]
+    assert result.submission.reply == "hello from codex"
+    assert result.submission.runtime_state["reply_buffer"] == "hello from codex"
+    assert result.submission.runtime_state["pane_hash_seen_at"] == "2026-04-26T00:00:05Z"

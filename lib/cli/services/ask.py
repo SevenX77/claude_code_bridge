@@ -11,7 +11,6 @@ from cli.ask_usage import ask_wait_poll_interval_seconds, ask_wait_timeout_secon
 from cli.render import render_watch_batch, write_lines
 
 from .ask_runtime import AskSummary, exit_code_for_ask_status, write_ask_output
-from .ask_runtime.slash import is_slash_ask_command
 from .ask_runtime.submission import submit_ask as _submit_ask_impl
 from .ask_runtime.watch import watch_ask_job as _watch_ask_job_impl
 from .daemon import CcbdServiceError, connect_mounted_daemon, invoke_mounted_daemon
@@ -34,7 +33,6 @@ def watch_ask_job(
     *,
     timeout: float | None,
     emit_output: bool,
-    command=None,
 ):
     return _watch_ask_job_impl(
         context,
@@ -42,8 +40,6 @@ def watch_ask_job(
         out,
         timeout=timeout,
         emit_output=emit_output,
-        command=command,
-        is_slash_ask_command_fn=is_slash_ask_command,
         connect_mounted_daemon_fn=connect_mounted_daemon,
         reconnect_error_classes=(CcbdClientError, CcbdServiceError),
         monotonic_fn=time.monotonic,
@@ -58,7 +54,6 @@ def watch_ask_job(
 __all__ = [
     'AskSummary',
     'exit_code_for_ask_status',
-    'is_slash_ask_command',
     'submit_ask',
     'watch_ask_job',
     'write_ask_output',

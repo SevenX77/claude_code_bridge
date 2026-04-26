@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 _SLASH_COMMAND_RE = re.compile(r'^/(?:clear|new|help|auth)(?:\s+.*)?$')
+_SLASH_SEND_KEYS_DELAY_S = 0.25
 
 
 def _is_slash_command(text: str) -> bool:
@@ -72,7 +73,7 @@ class TmuxTextSender:
         slash_command = _slash_command_text(sanitized)
         if slash_command:
             self.tmux_run_fn(['send-keys', '-t', pane_id, '-l', slash_command], check=True)
-            time.sleep(0.25)
+            self.sleep_fn(_SLASH_SEND_KEYS_DELAY_S)
             self.tmux_run_fn(['send-keys', '-t', pane_id, 'Enter'], check=True)
             return
 

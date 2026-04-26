@@ -13,8 +13,6 @@ def watch_ask_job(
     *,
     timeout: float | None,
     emit_output: bool,
-    command=None,
-    is_slash_ask_command_fn: Callable[[object], bool] | None = None,
     connect_mounted_daemon_fn: Callable,
     reconnect_error_classes: tuple[type[BaseException], ...],
     monotonic_fn: Callable[[], float],

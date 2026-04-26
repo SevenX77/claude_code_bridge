@@ -52,15 +52,14 @@ def test_handle_ask_wait_slash_job_id_still_enters_watch() -> None:
     calls: list[str] = []
     command = ParsedAskWaitCommand(project=None, job_id='/clear')
 
-    def watch_ask_job(context, job_id, out, timeout, emit_output, command=None):
-        del context, out, timeout, emit_output, command
+    def watch_ask_job(context, job_id, out, timeout, emit_output):
+        del context, out, timeout, emit_output
         calls.append('watch')
         assert job_id == '/clear'
         return SimpleNamespace(status='completed', reply='')
 
     services = SimpleNamespace(
         watch_ask_job=watch_ask_job,
-        is_slash_ask_command=lambda command: getattr(command, 'message', '') == '/clear',
         exit_code_for_ask_status=lambda status, reply: 0 if status == 'completed' and reply == '' else 1,
     )
 
@@ -74,17 +73,15 @@ def test_handle_ask_wait_passes_command_to_watch() -> None:
     captured: dict[str, object] = {}
     command = ParsedAskWaitCommand(project=None, job_id='job_1', timeout_s=12.5)
 
-    def watch_ask_job(context, job_id, out, timeout, emit_output, command=None):
+    def watch_ask_job(context, job_id, out, timeout, emit_output):
         del context, out
         captured['job_id'] = job_id
         captured['timeout'] = timeout
         captured['emit_output'] = emit_output
-        captured['command'] = command
         return SimpleNamespace(status='completed', reply='done')
 
     services = SimpleNamespace(
         watch_ask_job=watch_ask_job,
-        is_slash_ask_command=lambda command: False,
         exit_code_for_ask_status=lambda status, reply: 0 if status == 'completed' and reply == 'done' else 1,
     )
 
@@ -95,7 +92,6 @@ def test_handle_ask_wait_passes_command_to_watch() -> None:
         'job_id': 'job_1',
         'timeout': 12.5,
         'emit_output': True,
-        'command': command,
     }
 
 

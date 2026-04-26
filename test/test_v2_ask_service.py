@@ -303,7 +303,6 @@ def test_watch_ask_job_slash_command_polls_daemon_like_regular_wait(
         StringIO(),
         timeout=30.0,
         emit_output=True,
-        command=command,
     )
 
     assert batch.job_id == 'job_1'

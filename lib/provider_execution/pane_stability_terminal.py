@@ -25,56 +25,93 @@ def complete_after_pane_idle(
     pane_id: str,
     log_path_str: str | None,
     pane_only_threshold_s: float = PANE_ONLY_THRESHOLD_S,
+    require_log_mtime: bool = False,
 ) -> ProviderPollResult | None:
+    observed = observe_pane_stability(
+        submission,
+        now=now,
+        get_pane_content_fn=get_pane_content_fn,
+        pane_id=pane_id,
+        log_path_str=log_path_str,
+    )
+    return terminal_if_stable(
+        observed,
+        now=now,
+        pane_only_threshold_s=pane_only_threshold_s,
+        require_log_mtime=require_log_mtime,
+    )
+
+
+def observe_pane_stability(
+    submission: ProviderSubmission,
+    *,
+    now: str,
+    get_pane_content_fn,
+    pane_id: str,
+    log_path_str: str | None,
+) -> ProviderSubmission:
     if bool(submission.runtime_state.get(PANE_STABLE_TERMINAL_FLAG, False)):
-        return None
+        return submission
     if not callable(get_pane_content_fn):
-        return None
+        return submission
 
     try:
         text = str(get_pane_content_fn(pane_id, lines=200) or "")
     except Exception:
-        return None
+        return submission
 
     current_hash = hashlib.sha1(text.encode("utf-8", errors="replace")).hexdigest()
     last_hash = str(submission.runtime_state.get("pane_hash_last") or "")
-    pane_hash_seen_at = str(submission.runtime_state.get("pane_hash_seen_at") or "")
 
     if current_hash != last_hash:
-        return ProviderPollResult(
-            submission=replace(
-                submission,
-                runtime_state={
-                    **submission.runtime_state,
-                    "pane_hash_last": current_hash,
-                    "pane_hash_seen_at": now,
-                },
-            )
+        return replace(
+            submission,
+            runtime_state={
+                **submission.runtime_state,
+                "pane_hash_last": current_hash,
+                "pane_hash_seen_at": now,
+            },
         )
 
     current_log_mtime = _log_mtime_ns(log_path_str)
     if current_log_mtime is None:
+        return submission
+
+    log_mtime_last = str(submission.runtime_state.get("log_mtime_last") or "")
+    if current_log_mtime != log_mtime_last:
+        return replace(
+            submission,
+            runtime_state={
+                **submission.runtime_state,
+                "log_mtime_last": current_log_mtime,
+                "log_mtime_seen_at": now,
+            },
+        )
+    return submission
+
+
+def terminal_if_stable(
+    submission: ProviderSubmission,
+    *,
+    now: str,
+    pane_only_threshold_s: float = PANE_ONLY_THRESHOLD_S,
+    require_log_mtime: bool = False,
+) -> ProviderPollResult | None:
+    if bool(submission.runtime_state.get(PANE_STABLE_TERMINAL_FLAG, False)):
+        return None
+
+    pane_hash_seen_at = str(submission.runtime_state.get("pane_hash_seen_at") or "")
+    log_mtime_last = str(submission.runtime_state.get("log_mtime_last") or "")
+    log_mtime_seen_at = str(submission.runtime_state.get("log_mtime_seen_at") or "")
+    if require_log_mtime and (not log_mtime_last or not log_mtime_seen_at):
+        return None
+    if not log_mtime_last or not log_mtime_seen_at:
         return _complete_if_pane_only_threshold_met(
             submission,
             now=now,
             pane_hash_seen_at=pane_hash_seen_at,
             pane_only_threshold_s=pane_only_threshold_s,
         )
-
-    log_mtime_last = str(submission.runtime_state.get("log_mtime_last") or "")
-    log_mtime_seen_at = str(submission.runtime_state.get("log_mtime_seen_at") or "")
-    if current_log_mtime != log_mtime_last:
-        return ProviderPollResult(
-            submission=replace(
-                submission,
-                runtime_state={
-                    **submission.runtime_state,
-                    "log_mtime_last": current_log_mtime,
-                    "log_mtime_seen_at": now,
-                },
-            )
-        )
-
     try:
         now_dt = parse_utc_timestamp(now)
         pane_stable_s = (now_dt - parse_utc_timestamp(pane_hash_seen_at)).total_seconds() if pane_hash_seen_at else 0.0
@@ -170,4 +207,6 @@ __all__ = [
     "PANE_STABLE_TERMINAL_FLAG",
     "PANE_STABLE_THRESHOLD_S",
     "complete_after_pane_idle",
+    "observe_pane_stability",
+    "terminal_if_stable",
 ]

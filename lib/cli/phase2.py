@@ -18,7 +18,7 @@ from cli.phase2_runtime import (
 from cli.phase2_services import build_phase2_dispatch_services
 from cli.render import render_kill, write_lines
 from cli.services.ack import ack_reply
-from cli.services.ask import exit_code_for_ask_status, is_slash_ask_command, submit_ask, watch_ask_job, write_ask_output
+from cli.services.ask import exit_code_for_ask_status, submit_ask, watch_ask_job, write_ask_output
 from cli.services.cancel import cancel_job
 from cli.services.config_validate import validate_config_context
 from cli.services.doctor import doctor_summary
@@ -134,7 +134,6 @@ def _dispatch_services():
         exit_code_for_ask_status=exit_code_for_ask_status,
         export_diagnostic_bundle=export_diagnostic_bundle,
         inbox_target=inbox_target,
-        is_slash_ask_command=is_slash_ask_command,
         kill_project=kill_project,
         list_fault_rules=list_fault_rules,
         pend_target=pend_target,

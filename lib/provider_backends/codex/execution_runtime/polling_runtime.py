@@ -5,7 +5,7 @@ from dataclasses import replace
 from provider_execution.active import prepare_active_poll
 from provider_execution.base import ProviderPollResult, ProviderSubmission
 from provider_execution.no_wrap_terminal import complete_no_wrap_after_prompt_sent
-from provider_execution.pane_stability_terminal import complete_after_pane_idle
+from provider_execution.pane_stability_terminal import observe_pane_stability, terminal_if_stable
 
 from .event_reading import read_entries
 from .start import state_session_path
@@ -33,15 +33,21 @@ def poll_submission(submission: ProviderSubmission, *, now: str) -> ProviderPoll
         if no_wrap_terminal is not None:
             return no_wrap_terminal
         fallback_submission = replace_state_for_fallback(submission, poll, state)
-        pane_stable_terminal = complete_after_pane_idle(
+        fallback_submission = observe_pane_stability(
             fallback_submission,
             now=now,
             get_pane_content_fn=getattr(prepared.backend, "get_pane_content", None),
             pane_id=prepared.pane_id,
             log_path_str=str(fallback_submission.runtime_state.get("session_path") or ""),
         )
+        pane_stable_terminal = terminal_if_stable(
+            fallback_submission,
+            now=now,
+            require_log_mtime=True,
+        )
         if pane_stable_terminal is not None:
             return pane_stable_terminal
+        submission = fallback_submission
     return finalize_poll_result(submission, poll, state=state)
 
 

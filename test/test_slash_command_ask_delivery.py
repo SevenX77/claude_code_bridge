@@ -161,8 +161,8 @@ def test_ask_wait_slash_command_submits_and_watches(tmp_path: Path) -> None:
             jobs=({'job_id': 'job_1', 'agent_name': 'agent1', 'status': 'accepted'},),
         )
 
-    def watch_ask_job(context, job_id, out, timeout, emit_output, command=None):
-        del context, out, timeout, emit_output, command
+    def watch_ask_job(context, job_id, out, timeout, emit_output):
+        del context, out, timeout, emit_output
         calls.append('watch')
         assert job_id == 'job_1'
         return SimpleNamespace(status='completed', reply='')
@@ -170,7 +170,6 @@ def test_ask_wait_slash_command_submits_and_watches(tmp_path: Path) -> None:
     services = SimpleNamespace(
         submit_ask=submit_ask,
         watch_ask_job=watch_ask_job,
-        is_slash_ask_command=lambda command: True,
         write_ask_output=lambda path, reply: Path(path).write_text(reply, encoding='utf-8'),
         exit_code_for_ask_status=lambda status, reply: 0 if status == 'completed' and reply == '' else 1,
     )
@@ -203,15 +202,14 @@ def test_ask_wait_completed_submit_does_not_enter_watch(tmp_path: Path) -> None:
             jobs=({'job_id': 'job_1', 'agent_name': 'agent1', 'status': 'completed', 'reply': 'done'},),
         )
 
-    def watch_ask_job(context, job_id, out, timeout, emit_output, command=None):
-        del context, job_id, out, timeout, emit_output, command
+    def watch_ask_job(context, job_id, out, timeout, emit_output):
+        del context, job_id, out, timeout, emit_output
         calls.append('watch')
         raise AssertionError('completed submission must not watch')
 
     services = SimpleNamespace(
         submit_ask=submit_ask,
         watch_ask_job=watch_ask_job,
-        is_slash_ask_command=lambda command: False,
         write_ask_output=lambda path, reply: Path(path).write_text(reply, encoding='utf-8'),
         exit_code_for_ask_status=lambda status, reply: 0 if status == 'completed' and reply == 'done' else 1,
     )

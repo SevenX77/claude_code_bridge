@@ -22,7 +22,6 @@ def handle_ask(context, command, out, services) -> int:
         out,
         timeout=command.timeout_s,
         emit_output=command.output_path is None,
-        command=command,
     )
     reply = terminal.reply or ''
     if command.output_path is not None:
@@ -37,7 +36,6 @@ def handle_ask_wait(context, command, out, services) -> int:
         out,
         timeout=command.timeout_s,
         emit_output=True,
-        command=command,
     )
     return services.exit_code_for_ask_status(terminal.status, reply=terminal.reply or '')
 

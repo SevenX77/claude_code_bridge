@@ -9,7 +9,7 @@ from provider_execution.active import ensure_active_pane_alive, prepare_active_p
 from provider_execution.base import ProviderPollResult, ProviderSubmission
 from provider_execution.common import build_item, request_anchor_from_runtime_state
 from provider_execution.no_wrap_terminal import complete_no_wrap_after_prompt_sent
-from provider_execution.pane_stability_terminal import complete_after_pane_idle
+from provider_execution.pane_stability_terminal import observe_pane_stability, terminal_if_stable
 
 from ..start import looks_ready, send_prompt, state_session_path
 from .hook import poll_exact_hook
@@ -89,13 +89,14 @@ def poll_submission(
             'session_path': session_path,
         },
     )
-    pane_stable_terminal = complete_after_pane_idle(
+    updated = observe_pane_stability(
         updated,
         now=now,
         get_pane_content_fn=getattr(prepared.backend, 'get_pane_content', None),
         pane_id=prepared.pane_id,
         log_path_str=session_path,
     )
+    pane_stable_terminal = terminal_if_stable(updated, now=now)
     if pane_stable_terminal is not None:
         return pane_stable_terminal
     runtime_dirty = runtime_dirty or updated.reply != submission.reply or updated.runtime_state != submission.runtime_state

@@ -64,7 +64,9 @@ def test_slash_command_detection_whitelist_and_trailing_newline(text: str, expec
 
 def test_slash_command_send_uses_literal_send_keys_not_paste_buffer() -> None:
     calls: list[list[str]] = []
+    sleeps: list[float] = []
     sender = _build_slash_sender(lambda args, **kwargs: calls.append(list(args)) or _cp())
+    sender.sleep_fn = sleeps.append
 
     sender.send_text('%5', '/clear\n')
 
@@ -72,6 +74,7 @@ def test_slash_command_send_uses_literal_send_keys_not_paste_buffer() -> None:
         ['send-keys', '-t', '%5', '-l', '/clear'],
         ['send-keys', '-t', '%5', 'Enter'],
     ]
+    assert sleeps == [0.25]
     assert not any(c and c[0] == 'paste-buffer' for c in calls)
 
 
