@@ -35,6 +35,8 @@ ALLOWED_AGENT_KEYS = {
     'labels',
     'description',
     'watch_paths',
+    'pids_max',
+    'memory_max',
 }
 
 

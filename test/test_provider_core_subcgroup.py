@@ -104,6 +104,47 @@ class TestSetupKeeperSubcgroup:
         # Should still succeed
         assert subcgroup.setup_keeper_subcgroup() == "setup"
 
+    def test_setup_retries_activation_after_subtree_control_race(
+        self, mock_cgroup, monkeypatch
+    ):
+        (mock_cgroup / "cgroup.procs").write_text("11111\n22222\n")
+        original_write_text = Path.write_text
+        activation_attempts = 0
+
+        def flaky_write_text(path: Path, data: str, *args, **kwargs):
+            nonlocal activation_attempts
+            if path == mock_cgroup / "cgroup.subtree_control":
+                activation_attempts += 1
+                if activation_attempts == 1:
+                    raise OSError("root cgroup still has processes")
+            return original_write_text(path, data, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", flaky_write_text)
+
+        assert subcgroup.setup_keeper_subcgroup() == "setup"
+        assert activation_attempts == 2
+        st = mock_cgroup.joinpath("cgroup.subtree_control").read_text()
+        assert "+pids" in st and "+memory" in st
+
+    def test_setup_returns_failed_when_activation_never_succeeds(
+        self, mock_cgroup, monkeypatch
+    ):
+        (mock_cgroup / "cgroup.procs").write_text("11111\n22222\n")
+        original_write_text = Path.write_text
+        activation_attempts = 0
+
+        def failing_write_text(path: Path, data: str, *args, **kwargs):
+            nonlocal activation_attempts
+            if path == mock_cgroup / "cgroup.subtree_control":
+                activation_attempts += 1
+                raise OSError("root cgroup still has processes")
+            return original_write_text(path, data, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", failing_write_text)
+
+        assert subcgroup.setup_keeper_subcgroup() == "failed"
+        assert activation_attempts == 5
+
 
 class TestMovePidToAgentSubcgroup:
     def test_skipped_when_flag_disabled(self, monkeypatch):

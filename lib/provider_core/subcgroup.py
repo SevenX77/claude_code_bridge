@@ -74,6 +74,8 @@ SetupResult = Literal[
     "setup", "already_setup", "skipped_disabled", "skipped_unsupported", "failed"
 ]
 KEEPER_SUBCGROUP_NAME = "keeper"
+_KEEPER_SETUP_MAX_PASSES = 5
+_SUBTREE_CONTROLLERS = "+pids +memory\n"
 
 
 def is_enabled() -> bool:
@@ -160,42 +162,35 @@ def setup_keeper_subcgroup() -> SetupResult:
         logger.warning("setup_keeper_subcgroup: mkdir failed: %s", e)
         return "failed"
 
-    # Move ALL scope-root PIDs (including this process and any sibling
-    # daemons like ccb CLI, ccbd daemon_process) into keeper/. cgroup v2
-    # "no internal processes" rule requires the scope root be empty of
-    # processes BEFORE we can enable `+pids +memory` on subtree_control.
-    _drain_scope_root_into_keeper(keeper_cg, keeper_sub)
-
-    try:
-        (keeper_cg / "cgroup.subtree_control").write_text("+pids +memory\n")
-    except OSError as e:
-        # Still failing means some child races with us - log and continue.
-        # agent-<name> children will still work IF subtree_control is
-        # already enabled from a previous run.
+    if not _drain_scope_root_and_enable_controllers(keeper_cg, keeper_sub):
         logger.warning(
-            "setup_keeper_subcgroup: subtree_control write failed: %s "
-            "(agent limits may not enforce)", e,
+            "setup_keeper_subcgroup: failed to enable subtree controllers "
+            "after %d passes (agent limits may not enforce)",
+            _KEEPER_SETUP_MAX_PASSES,
         )
+        return "failed"
 
     logger.info("setup_keeper_subcgroup: moved scope-root procs into %s",
                 keeper_sub)
     return "setup"
 
 
-def _drain_scope_root_into_keeper(scope_cg: Path, keeper_sub: Path) -> None:
-    """Move every PID currently in scope root into keeper/.
+def _drain_scope_root_and_enable_controllers(scope_cg: Path, keeper_sub: Path) -> bool:
+    """Drain scope-root PIDs, then enable child controllers.
 
-    Retry up to 3 passes because children can be forked between reads.
+    The subtree_control write is the kernel-side validation point for the
+    "no internal processes" rule. Retrying the drain immediately before
+    activation closes the previous check-then-activate race for ordinary
+    fork timing; continuously forking roots can still exhaust the pass limit.
     """
     procs_file = scope_cg / "cgroup.procs"
     keeper_procs_file = keeper_sub / "cgroup.procs"
-    for _ in range(3):
+    subtree_control_file = scope_cg / "cgroup.subtree_control"
+    for attempt in range(1, _KEEPER_SETUP_MAX_PASSES + 1):
         try:
             root_pids = procs_file.read_text().split()
         except OSError:
-            return
-        if not root_pids:
-            return
+            return False
         for pid in root_pids:
             if not pid.isdigit():
                 continue
@@ -205,6 +200,16 @@ def _drain_scope_root_into_keeper(scope_cg: Path, keeper_sub: Path) -> None:
                 # Process may have exited, or cgroup may have raced.
                 # Non-fatal; next pass will catch remaining.
                 continue
+        try:
+            subtree_control_file.write_text(_SUBTREE_CONTROLLERS)
+            logger.info(
+                "setup_keeper_subcgroup: enabled subtree controllers on pass %d",
+                attempt,
+            )
+            return True
+        except OSError:
+            continue
+    return False
 
 
 def move_pid_to_agent_subcgroup(

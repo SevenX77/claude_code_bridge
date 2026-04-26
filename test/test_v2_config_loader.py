@@ -164,6 +164,33 @@ def test_load_project_config_supports_explicit_worktree_suffix_in_compact_config
     assert result.config.layout_spec == 'cmd; agent1:codex(worktree), agent2:claude'
 
 
+def test_load_project_config_supports_compact_agent_budget(tmp_path: Path) -> None:
+    project_root = tmp_path / 'repo-agent-budget-compact'
+    config_path = project_root / '.ccb' / 'ccb.config'
+    _write(
+        config_path,
+        'cmd; a1:codex, a2:claude\n'
+        'agent-budget: a1=pids:800,mem:4G ; a2=pids:150,mem:1G\n',
+    )
+
+    result = load_project_config(project_root)
+
+    assert result.config.agents['a1'].pids_max == 800
+    assert result.config.agents['a1'].memory_max == '4G'
+    assert result.config.agents['a2'].pids_max == 150
+    assert result.config.agents['a2'].memory_max == '1G'
+    assert result.config.layout_spec == 'cmd; a1:codex, a2:claude'
+
+
+def test_load_project_config_rejects_compact_agent_budget_for_unknown_agent(tmp_path: Path) -> None:
+    project_root = tmp_path / 'repo-agent-budget-unknown'
+    config_path = project_root / '.ccb' / 'ccb.config'
+    _write(config_path, 'a1:codex\nagent-budget: missing=pids:800,mem:4G\n')
+
+    with pytest.raises(ConfigValidationError, match='unknown agent missing'):
+        load_project_config(project_root)
+
+
 def test_ensure_bootstrap_project_config_ignores_session_residue_for_default_bootstrap(tmp_path: Path) -> None:
     project_root = tmp_path / 'repo-session-residue'
     _write(project_root / '.ccb' / '.codex-agent1-session', '{}\n')
@@ -265,6 +292,68 @@ OPENAI_API_KEY = "sk-test"
     assert spec.provider_profile.inherit_skills is False
     assert spec.provider_profile.inherit_commands is False
     assert spec.provider_profile.env == {'OPENAI_API_KEY': 'sk-test'}
+
+
+def test_load_project_config_supports_toml_agent_budget_key(tmp_path: Path) -> None:
+    project_root = tmp_path / 'repo-toml-agent-budget'
+    config_path = project_root / '.ccb' / 'ccb.config'
+    _write(
+        config_path,
+        '''version = 2
+default_agents = ["a1", "a2"]
+layout = "cmd; a1:codex, a2:claude"
+cmd_enabled = true
+agent-budget = "a1=pids:800,mem:4G ; a2=pids:150,mem:1G"
+
+[agents.a1]
+provider = "codex"
+target = "."
+workspace_mode = "inplace"
+restore = "auto"
+permission = "manual"
+
+[agents.a2]
+provider = "claude"
+target = "."
+workspace_mode = "inplace"
+restore = "auto"
+permission = "manual"
+''',
+    )
+
+    result = load_project_config(project_root)
+
+    assert result.config.agents['a1'].pids_max == 800
+    assert result.config.agents['a1'].memory_max == '4G'
+    assert result.config.agents['a2'].pids_max == 150
+    assert result.config.agents['a2'].memory_max == '1G'
+
+
+def test_load_project_config_supports_toml_agent_budget_fields(tmp_path: Path) -> None:
+    project_root = tmp_path / 'repo-toml-agent-budget-fields'
+    config_path = project_root / '.ccb' / 'ccb.config'
+    _write(
+        config_path,
+        '''version = 2
+default_agents = ["a1"]
+layout = "a1:codex"
+
+[agents.a1]
+provider = "codex"
+target = "."
+workspace_mode = "inplace"
+restore = "auto"
+permission = "manual"
+pids_max = 800
+memory_max = "4G"
+''',
+    )
+
+    result = load_project_config(project_root)
+    spec = result.config.agents['a1']
+
+    assert spec.pids_max == 800
+    assert spec.memory_max == '4G'
 
 
 def test_load_project_config_reads_project_ccb_config_path(tmp_path: Path) -> None:

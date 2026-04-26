@@ -36,6 +36,8 @@ class AgentSpec:
     labels: tuple[str, ...] = field(default_factory=tuple)
     description: str | None = None
     watch_paths: tuple[str, ...] = field(default_factory=tuple)
+    pids_max: int | None = None
+    memory_max: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, 'name', normalize_agent_name(self.name))
@@ -53,6 +55,16 @@ class AgentSpec:
         object.__setattr__(self, 'watch_paths', tuple(str(item) for item in self.watch_paths))
         object.__setattr__(self, 'env', {str(key): str(value) for key, value in dict(self.env).items()})
         object.__setattr__(self, 'provider_profile', normalize_provider_profile(self.provider_profile))
+        if self.pids_max is not None:
+            pids_max = int(self.pids_max)
+            if pids_max <= 0:
+                raise AgentValidationError('pids_max must be positive')
+            object.__setattr__(self, 'pids_max', pids_max)
+        if self.memory_max is not None:
+            memory_max = str(self.memory_max).strip()
+            if not memory_max:
+                raise AgentValidationError('memory_max cannot be empty')
+            object.__setattr__(self, 'memory_max', memory_max)
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -74,6 +86,8 @@ class AgentSpec:
             'labels': list(self.labels),
             'description': self.description,
             'watch_paths': list(self.watch_paths),
+            'pids_max': self.pids_max,
+            'memory_max': self.memory_max,
         }
 
 

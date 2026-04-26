@@ -62,7 +62,13 @@ def _best_effort_migrate_agent_subcgroup(backend, pane_id: str, spec) -> None:
         _logger.warning("subcgroup: pane_pid not numeric for %s: %r", pane_id, pane_pid)
         return
     try:
-        outcome = move_pid_to_agent_subcgroup(int(pane_pid), spec.name, spec.provider)
+        outcome = move_pid_to_agent_subcgroup(
+            int(pane_pid),
+            spec.name,
+            spec.provider,
+            pids_max=getattr(spec, 'pids_max', None),
+            memory_max=getattr(spec, 'memory_max', None),
+        )
     except Exception as e:  # noqa: BLE001
         _logger.warning("subcgroup: move_pid_to_agent_subcgroup raised: %s", e)
         return

@@ -19,6 +19,16 @@ from .expectations import expect_mapping, expect_string, expect_string_list, exp
 from .provider_profiles import parse_provider_profile
 
 
+def _expect_optional_positive_int(value: Any, *, field_name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigValidationError(f'{field_name} must be a positive integer')
+    if value <= 0:
+        raise ConfigValidationError(f'{field_name} must be a positive integer')
+    return value
+
+
 def build_agent_spec(agent_name: str, raw: dict[str, Any]) -> AgentSpec:
     unknown = sorted(set(raw) - ALLOWED_AGENT_KEYS)
     if unknown:
@@ -71,6 +81,15 @@ def build_agent_spec(agent_name: str, raw: dict[str, Any]) -> AgentSpec:
                 else None
             ),
             watch_paths=expect_string_list(raw.get('watch_paths', []), field_name=f'agents.{agent_name}.watch_paths'),
+            pids_max=_expect_optional_positive_int(
+                raw.get('pids_max'),
+                field_name=f'agents.{agent_name}.pids_max',
+            ),
+            memory_max=(
+                expect_string(raw['memory_max'], field_name=f'agents.{agent_name}.memory_max')
+                if raw.get('memory_max') is not None
+                else None
+            ),
         )
     except AgentValidationError as exc:
         raise ConfigValidationError(str(exc)) from exc

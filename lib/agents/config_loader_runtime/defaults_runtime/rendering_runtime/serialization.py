@@ -34,6 +34,10 @@ def update_optional_agent_fields(payload: dict[str, object], spec) -> None:
         payload['description'] = spec.description
     if spec.watch_paths:
         payload['watch_paths'] = list(spec.watch_paths)
+    if spec.pids_max is not None:
+        payload['pids_max'] = spec.pids_max
+    if spec.memory_max is not None:
+        payload['memory_max'] = spec.memory_max
 
 
 __all__ = ['agent_spec_to_config_dict', 'update_optional_agent_fields']

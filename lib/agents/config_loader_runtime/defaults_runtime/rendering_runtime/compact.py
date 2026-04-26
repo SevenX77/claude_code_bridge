@@ -17,6 +17,8 @@ def is_compact_agent_compatible(spec) -> bool:
         and not spec.labels
         and spec.description is None
         and not spec.watch_paths
+        and spec.pids_max is None
+        and spec.memory_max is None
     )
 
 
