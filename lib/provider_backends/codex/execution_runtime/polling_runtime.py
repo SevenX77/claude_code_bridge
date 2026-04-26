@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from provider_execution.active import prepare_active_poll
 from provider_execution.base import ProviderPollResult, ProviderSubmission
 from provider_execution.no_wrap_terminal import complete_no_wrap_after_prompt_sent
+from provider_execution.pane_stability_terminal import complete_after_pane_idle
 
 from .event_reading import read_entries
 from .start import state_session_path
@@ -29,7 +32,29 @@ def poll_submission(submission: ProviderSubmission, *, now: str) -> ProviderPoll
         no_wrap_terminal = complete_no_wrap_after_prompt_sent(submission, now=now)
         if no_wrap_terminal is not None:
             return no_wrap_terminal
+        fallback_submission = replace_state_for_fallback(submission, poll, state)
+        pane_stable_terminal = complete_after_pane_idle(
+            fallback_submission,
+            now=now,
+            get_pane_content_fn=getattr(prepared.backend, "get_pane_content", None),
+            pane_id=prepared.pane_id,
+            log_path_str=str(fallback_submission.runtime_state.get("session_path") or ""),
+        )
+        if pane_stable_terminal is not None:
+            return pane_stable_terminal
     return finalize_poll_result(submission, poll, state=state)
+
+
+def replace_state_for_fallback(submission, poll, state):
+    return replace(
+        submission,
+        runtime_state={
+            **submission.runtime_state,
+            "state": state,
+            "session_path": poll.session_path,
+            "next_seq": poll.next_seq,
+        },
+    )
 
 
 def poll_entry_batches(submission, poll, reader, state, *, now: str):
