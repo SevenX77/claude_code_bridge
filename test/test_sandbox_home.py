@@ -22,6 +22,7 @@ def test_materialize_sandbox_home_creates_top_level_and_nested_symlinks(monkeypa
     (home_root / '.gitconfig').write_text('[user]\nname = test\n', encoding='utf-8')
 
     # Set up provider auth files
+    (home_root / '.claude.json').write_text('{"trust":"yes"}\n', encoding='utf-8')
     (home_root / '.claude').mkdir(parents=True)
     (home_root / '.claude' / '.credentials.json').write_text('{"token":"claude-tok"}\n', encoding='utf-8')
     (home_root / '.codex').mkdir(parents=True)
@@ -42,6 +43,10 @@ def test_materialize_sandbox_home_creates_top_level_and_nested_symlinks(monkeypa
     # Top-level whitelist
     assert sandbox_home.joinpath('.ssh').is_symlink()
     assert sandbox_home.joinpath('.gitconfig').is_symlink()
+
+    # Top-level Claude Code onboarding file
+    assert sandbox_home.joinpath('.claude.json').is_symlink()
+    assert sandbox_home.joinpath('.claude.json').resolve() == (home_root / '.claude.json').resolve()
 
     # Nested provider auth — symlinks must exist and resolve to real source
     assert sandbox_home.joinpath('.claude/.credentials.json').is_symlink()

@@ -19,6 +19,9 @@ WHITELIST = ('.ssh', '.gitconfig', '.git-credentials', '.netrc')
 # in launcher_runtime/home.py. Symlinking them would let an agent's
 # launcher overwrite the user's real config.
 PROVIDER_AUTH_WHITELIST = (
+    '.claude.json',  # Top-level Claude Code onboarding/trust file (NOT under .claude/).
+                     # Without this, Claude Code shows the OAuth login screen even when
+                     # .claude/.credentials.json is present.
     '.claude/.credentials.json',
     '.codex/auth.json',
     '.codex/installation_id',
